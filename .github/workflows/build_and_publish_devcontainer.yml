@@ -24,8 +24,3 @@ jobs:
         with:
           # Change this to point to your image name
           imageName: glueops/codespaces
-          # Change this to be your CI task/script
-          runCmd: |
-            # Add multiple commands to run if needed
-            make install-packages
-            make ci-build
