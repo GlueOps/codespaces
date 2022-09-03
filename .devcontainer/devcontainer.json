@@ -8,6 +8,9 @@
 		// Use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon.
 		"args": { "VARIANT": "ubuntu-20.04" }
 	},
+	"runArgs": ["--init", "--privileged"],
+	"mounts": ["source=dind-var-lib-docker,target=/var/lib/docker,type=volume"],
+	"overrideCommand": false,
 
 	// Set *default* container specific settings.json values on container create.
 	"settings": {},
