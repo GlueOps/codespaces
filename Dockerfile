@@ -8,6 +8,9 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
+RUN apt-get update && apt-get -y install gettext-base tmux \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 RUN curl -sSL https://sdk.cloud.google.com | bash
@@ -17,6 +20,5 @@ RUN gcloud components install alpha --quiet
 RUN gcloud components install beta --quiet
 RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.14.1/install-task.sh)" -- -d -b /usr/local/bin/
 RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
-RUN apt update && apt install tmux -y && apt clean -y
 RUN curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.4.11/argocd-linux-amd64
 RUN chmod +x /usr/local/bin/argocd
