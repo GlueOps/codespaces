@@ -17,7 +17,7 @@ RUN gcloud components install alpha --quiet
 RUN gcloud components install beta --quiet
 RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.17.0/install-task.sh)" -- -d -b /usr/local/bin/
 #RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
-RUN apt update && apt install tmux dnsutils telnet iputils-ping -y && apt clean -y
+RUN apt update && apt install tmux dnsutils telnet iputils-ping jq -y && apt clean -y
 RUN curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.4.15/argocd-linux-amd64
 RUN chmod +x /usr/local/bin/argocd
 
