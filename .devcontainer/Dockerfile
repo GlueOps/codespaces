@@ -20,6 +20,8 @@ RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.1
 RUN apt update && apt install tmux dnsutils telnet iputils-ping jq -y && apt clean -y
 RUN curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/download/v2.5.2/argocd-linux-amd64
 RUN chmod +x /usr/local/bin/argocd
+RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
+RUN chmod +x /usr/local/bin/kind
 
 ARG NONROOT_USER=vscode
 
