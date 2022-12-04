@@ -10,6 +10,8 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 
 
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
+ADD glueops-fetch-repos /usr/bin/glueops-repo-fetch
+RUN chmod +x /usr/bin/glueops-repo-fetch
 RUN curl -sSL https://sdk.cloud.google.com | bash
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 RUN gcloud components install gke-gcloud-auth-plugin --quiet
