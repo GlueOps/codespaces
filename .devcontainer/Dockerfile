@@ -24,6 +24,10 @@ RUN curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/relea
 RUN chmod +x /usr/local/bin/argocd
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
 RUN chmod +x /usr/local/bin/kind
+RUN wget https://github.com/derailed/k9s/releases/download/v0.26.7/k9s_Linux_x86_64.tar.gz
+RUN tar -xvf k9s_Linux_x86_64.tar.gz k9s
+RUN mv k9s /usr/local/bin
+RUN rm k9s_Linux_x86_64.tar.gz
 
 ARG NONROOT_USER=vscode
 
