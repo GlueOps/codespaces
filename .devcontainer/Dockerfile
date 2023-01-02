@@ -30,6 +30,7 @@ RUN mv k9s /usr/local/bin
 RUN rm k9s_Linux_x86_64.tar.gz
 
 ARG NONROOT_USER=vscode
+RUN git config --global --add --bool push.autoSetupRemote true
 
 RUN echo "#!/bin/sh\n\
     sudoIf() { if [ \"\$(id -u)\" -ne 0 ]; then sudo \"\$@\"; else \"\$@\"; fi }\n\
