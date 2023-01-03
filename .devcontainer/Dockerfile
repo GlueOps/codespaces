@@ -28,6 +28,11 @@ RUN wget https://github.com/derailed/k9s/releases/download/v0.26.7/k9s_Linux_x86
 RUN tar -xvf k9s_Linux_x86_64.tar.gz k9s
 RUN mv k9s /usr/local/bin
 RUN rm k9s_Linux_x86_64.tar.gz
+RUN curl -Lo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz
+RUN tar -xzf terraform-docs.tar.gz
+RUN chmod +x terraform-docs
+RUN mv terraform-docs /usr/local/bin
+RUN rm terraform-docs.tar.gz
 
 ARG NONROOT_USER=vscode
 RUN git config --global --add --bool push.autoSetupRemote true
