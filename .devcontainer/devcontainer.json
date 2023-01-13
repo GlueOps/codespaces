@@ -39,7 +39,11 @@
 		"aws-cli": "latest",
 		"sshd": "latest",
 		"node": "18.12.1",
-		"python": "3.11.1",
-		"golang": "1.19.4",
+		"python": {
+			"version" : "3.11.1",
+			"installTools" : true,
+			"installJupyterlab" : true
+		},
+		"golang": "1.19.4"
 	}
 }
