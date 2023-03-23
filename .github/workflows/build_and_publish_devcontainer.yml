@@ -21,10 +21,9 @@ jobs:
       - name: Generate Variables for Tags
         uses: rlespinasse/github-slug-action@v3.x
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
+      - name: Build and run dev container task
+        uses: devcontainers/ci@v0.3
         with:
-          context: .
-          push: true
-          tags: "ghcr.io/${{ env.GITHUB_REPOSITORY_OWNER_PART_SLUG }}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}:${{ env.GITHUB_REF_SLUG }},ghcr.io/${{ env.GITHUB_REPOSITORY_OWNER_PART_SLUG }}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}:${{ github.sha }}" 
-          labels: ${{ steps.meta.outputs.labels }}
+          imageName: ghcr.io/${{ env.GITHUB_REPOSITORY_OWNER_PART_SLUG }}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}
+          imageTag: ${{ env.GITHUB_REF_SLUG }}
+          push: always
