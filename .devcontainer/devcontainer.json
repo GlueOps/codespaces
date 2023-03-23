@@ -44,6 +44,6 @@
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
-		"golang": "1.19.6"
+		"golang": "1.19.7"
 	}
 }
