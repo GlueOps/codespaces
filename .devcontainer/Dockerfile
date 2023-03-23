@@ -27,7 +27,7 @@ ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 RUN gcloud components install gke-gcloud-auth-plugin --quiet
 RUN gcloud components install alpha --quiet
 RUN gcloud components install beta --quiet
-RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.20.0/install-task.sh)" -- -d -b /usr/local/bin/
+RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.22.0/install-task.sh)" -- -d -b /usr/local/bin/
 #RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
 RUN apt update && apt install tmux dnsutils telnet iputils-ping jq certbot -y && apt clean -y
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
