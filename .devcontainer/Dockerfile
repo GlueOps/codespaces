@@ -22,6 +22,7 @@ RUN chmod +x \
   /usr/bin/admiral-helm-diff \
   /usr/bin/admiral-helm-apply \
   /usr/bin/admiral-helm-template
+ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=423.0.0
 RUN curl -sSL https://sdk.cloud.google.com | bash
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 RUN gcloud components install gke-gcloud-auth-plugin --quiet
