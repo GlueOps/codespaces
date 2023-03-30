@@ -1,3 +1,0 @@
-#https://github.com/GlueOps/admiral
-
-helm template captain -f captain.yaml --dependency-update --namespace=glueops-core ./admiral/glueops-platform
