@@ -41,6 +41,8 @@ RUN mv terraform-docs /usr/local/bin
 RUN rm terraform-docs.tar.gz
 
 ARG NONROOT_USER=vscode
+RUN mkdir -p /home/vscode/.local/share/helm/plugins
+RUN curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
 
 RUN echo "#!/bin/sh\n\
