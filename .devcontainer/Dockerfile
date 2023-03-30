@@ -12,16 +12,10 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
 ADD ../tools/run-gha /usr/bin/run-gha
-ADD ../tools/admiral-helm-diff /usr/bin/admiral-helm-diff
-ADD ../tools/admiral-helm-apply /usr/bin/admiral-helm-apply
-ADD ../tools/admiral-helm-template /usr/bin/admiral-helm-template
 
 RUN chmod +x \
   /usr/bin/glueops-repo-fetch \
-  /usr/bin/run-gha \
-  /usr/bin/admiral-helm-diff \
-  /usr/bin/admiral-helm-apply \
-  /usr/bin/admiral-helm-template
+  /usr/bin/run-gha
 ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=423.0.0
 RUN curl -sSL https://sdk.cloud.google.com | bash
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
@@ -44,6 +38,8 @@ RUN mv terraform-docs /usr/local/bin
 RUN rm terraform-docs.tar.gz
 
 ARG NONROOT_USER=vscode
+RUN mkdir -p /home/vscode/.local/share/helm/plugins
+RUN curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
 
 RUN echo "#!/bin/sh\n\
