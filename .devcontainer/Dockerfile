@@ -38,10 +38,6 @@ RUN mv terraform-docs /usr/local/bin
 RUN rm terraform-docs.tar.gz
 
 ARG NONROOT_USER=vscode
-RUN mkdir -p /home/vscode/.local/share/helm/plugins
-RUN curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
-RUN git config --global --add --bool push.autoSetupRemote true
-
 RUN echo "#!/bin/sh\n\
     sudoIf() { if [ \"\$(id -u)\" -ne 0 ]; then sudo \"\$@\"; else \"\$@\"; fi }\n\
     SOCKET_GID=\$(stat -c '%g' /var/run/docker.sock) \n\
@@ -56,5 +52,11 @@ RUN echo "#!/bin/sh\n\
 # Setting the ENTRYPOINT to docker-init.sh will configure non-root access to
 # the Docker socket if "overrideCommand": false is set in devcontainer.json.
 # The script will also execute CMD if you need to alter startup behaviors.
+
+USER vscode
+RUN mkdir -p /home/vscode/.local/share/helm/plugins
+RUN curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
+RUN git config --global --add --bool push.autoSetupRemote true
+USER root
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
 CMD [ "sleep", "infinity" ]
