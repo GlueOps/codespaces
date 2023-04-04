@@ -12,10 +12,12 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
 ADD ../tools/run-gha /usr/bin/run-gha
+ADD ../tools/eks-auth /usr/bin/eks-auth
 
 RUN chmod +x \
   /usr/bin/glueops-repo-fetch \
-  /usr/bin/run-gha
+  /usr/bin/run-gha \
+  /usr/bin/eks-auth
 ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=423.0.0
 RUN curl -sSL https://sdk.cloud.google.com | bash
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
