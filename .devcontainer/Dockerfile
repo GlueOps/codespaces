@@ -29,7 +29,6 @@ ADD ../tools/run-gha /usr/bin/run-gha
 RUN chmod +x \
   /usr/bin/glueops-repo-fetch \
   /usr/bin/run-gha
-ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
     && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
@@ -92,6 +91,7 @@ RUN echo "#!/bin/sh\n\
 # The script will also execute CMD if you need to alter startup behaviors.
 
 USER vscode
+ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v${VERSION_HELM_DIFF}/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
