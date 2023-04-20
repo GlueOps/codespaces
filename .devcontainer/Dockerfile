@@ -26,6 +26,9 @@ ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
 ADD ../tools/run-gha /usr/bin/run-gha
+RUN chmod +x \
+  /usr/bin/glueops-repo-fetch \
+  /usr/bin/run-gha
 ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
@@ -37,9 +40,6 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && mv linux-amd64/helm /usr/local/bin \
     && rm -rf linux-amd64 helm.tar.gz
 
-RUN chmod +x \
-  /usr/bin/glueops-repo-fetch \
-  /usr/bin/run-gha
 ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
 # Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
 RUN curl -sSL https://sdk.cloud.google.com | bash \
@@ -50,6 +50,7 @@ RUN curl -sSL https://sdk.cloud.google.com | bash \
     && rm -rf $(find /usr/local/gcloud/google-cloud-sdk/ -regex ".*/__pycache__") \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/.install/.backup \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
     && apt update \
     && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
     && apt clean -y
