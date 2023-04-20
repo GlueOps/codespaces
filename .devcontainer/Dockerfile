@@ -31,6 +31,7 @@ RUN chmod +x \
   /usr/bin/run-gha
 ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
+    && chmod +x /usr/local/bin/kubectl \
     && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
     && unzip terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
     && mv terraform /usr/local/bin \
