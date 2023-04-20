@@ -16,26 +16,33 @@ ADD ../tools/run-gha /usr/bin/run-gha
 RUN chmod +x \
   /usr/bin/glueops-repo-fetch \
   /usr/bin/run-gha
-ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=423.0.0
-RUN curl -sSL https://sdk.cloud.google.com | bash
-ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
-RUN gcloud components install gke-gcloud-auth-plugin --quiet
-RUN gcloud components install alpha --quiet
-RUN gcloud components install beta --quiet
-RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.22.0/install-task.sh)" -- -d -b /usr/local/bin/
+ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=427.0.0
+# Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
+RUN curl -sSL https://sdk.cloud.google.com | bash \
+    && export PATH=$PATH:/usr/local/gcloud/google-cloud-sdk/bin \
+    && gcloud components install gke-gcloud-auth-plugin --quiet \
+    && gcloud components install alpha --quiet \
+    && gcloud components install beta --quiet \
+    && rm -rf $(find /usr/local/gcloud/google-cloud-sdk/ -regex ".*/__pycache__") \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/.install/.backup \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
+    && apt update \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
+    && apt clean -y
+RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v3.24.0/install-task.sh)" -- -d -b /usr/local/bin/
 #RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
-RUN apt update && apt install tmux dnsutils telnet iputils-ping jq certbot -y && apt clean -y
-RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.17.0/kind-linux-amd64
-RUN chmod +x /usr/local/bin/kind
-RUN wget https://github.com/derailed/k9s/releases/download/v0.27.3/k9s_Linux_amd64.tar.gz
-RUN tar -xvf k9s_Linux_amd64.tar.gz k9s
-RUN mv k9s /usr/local/bin
-RUN rm k9s_Linux_amd64.tar.gz
-RUN curl -Lo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz
-RUN tar -xzf terraform-docs.tar.gz
-RUN chmod +x terraform-docs
-RUN mv terraform-docs /usr/local/bin
-RUN rm terraform-docs.tar.gz
+ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
+RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.18.0/kind-linux-amd64 \
+    && chmod +x /usr/local/bin/kind
+RUN wget https://github.com/derailed/k9s/releases/download/v0.27.3/k9s_Linux_amd64.tar.gz \
+    && tar -xvf k9s_Linux_amd64.tar.gz k9s \
+    && mv k9s /usr/local/bin \
+    && rm k9s_Linux_amd64.tar.gz
+RUN curl -Lo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.16.0/terraform-docs-v0.16.0-$(uname)-amd64.tar.gz \ 
+    && tar -xzf terraform-docs.tar.gz \
+    && chmod +x terraform-docs \ 
+    && mv terraform-docs /usr/local/bin \
+    && rm terraform-docs.tar.gz
 
 ARG NONROOT_USER=vscode
 RUN echo "#!/bin/sh\n\
@@ -54,8 +61,8 @@ RUN echo "#!/bin/sh\n\
 # The script will also execute CMD if you need to alter startup behaviors.
 
 USER vscode
-RUN mkdir -p /home/vscode/.local/share/helm/plugins
-RUN curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
+RUN mkdir -p /home/vscode/.local/share/helm/plugins \
+    && curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
 USER root
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]

@@ -28,22 +28,22 @@
 		"docker-in-docker": "latest",
 		"docker-from-docker": "latest",
 		"kubectl-helm-minikube": {//https://github.com/microsoft/vscode-dev-containers/blob/main/script-library/docs/kubectl-helm.md
-			"kubectl": "1.24.12",
-			"helm": "3.11.2", // use the same version used by argocd
+			"kubectl": "1.26.3",
+			"helm": "3.11.3", // This does NOT always match the version used by argocd.
 			"minikube": "none"
 		},
-		"terraform": "1.4.2",
+		"terraform": "1.4.5",
 		"git": "latest",
 		"git-lfs": "latest",
 		"github-cli": "latest",
 		"aws-cli": "latest",
 		"sshd": "latest",
-		"node": "18.15.0",
+		"node": "18.16.0",
 		"python": {
 			"version" : "3.11.2",
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
-		"golang": "1.19.7"
+		"golang": "1.19.8"
 	}
 }
