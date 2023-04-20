@@ -8,7 +8,9 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-
+# https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
+# https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
+ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
 ADD ../tools/run-gha /usr/bin/run-gha
@@ -68,6 +70,12 @@ RUN echo "#!/bin/sh\n\
 USER vscode
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v3.6.0/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
+RUN helm repo add glueops-platform https://helm.gpkg.io/platform \
+    && helm repo add glueops-service https://helm.gpkg.io/service \
+    && helm repo add glueops-project-template https://helm.gpkg.io/project-template \
+    && helm repo add incubating-glueops-platform https://incubating-helm.gpkg.io/platform \
+    && helm repo add incubating-glueops-service https://incubating-helm.gpkg.io/service \
+    && helm repo add incubating-glueops-project-template https://incubating-helm.gpkg.io/project-template
 RUN git config --global --add --bool push.autoSetupRemote true
 USER root
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
