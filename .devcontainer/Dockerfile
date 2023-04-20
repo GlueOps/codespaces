@@ -43,6 +43,11 @@ RUN curl -Lo ./terraform-docs.tar.gz https://github.com/terraform-docs/terraform
     && chmod +x terraform-docs \ 
     && mv terraform-docs /usr/local/bin \
     && rm terraform-docs.tar.gz
+RUN curl -Lo https://github.com/doitintl/kube-no-trouble/releases/download/0.7.0/kubent-0.7.0-linux-amd64.tar.gz \
+    && tar -xzf kubent-0.7.0-linux-amd64.tar.gz \
+    && chmod +x kubent \
+    && mv kubent /usr/local/bin \
+    && rm kubent-0.7.0-linux-amd64.tar.gz
 
 ARG NONROOT_USER=vscode
 RUN echo "#!/bin/sh\n\
