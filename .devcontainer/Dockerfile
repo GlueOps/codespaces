@@ -95,7 +95,7 @@ ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v${VERSION_HELM_DIFF}/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
-RUN chown -R vscode:vscode /home/vscode
 USER root
+RUN chown -R vscode:vscode /home/vscode
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
 CMD [ "sleep", "infinity" ]
