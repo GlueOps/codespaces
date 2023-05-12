@@ -24,6 +24,7 @@ ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.7.0
 ARG VERSION_CHARM_GUM=0.10.0
+ARG VERSION_ARGO_CD_CLI=2.7.2
 
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
@@ -81,6 +82,10 @@ RUN curl -Lo ./gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz https://github.com/c
     && chmod +x gum \
     && mv gum /usr/local/bin \
     && rm gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz
+RUN curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v${VERSION_ARGO_CD_CLI}/argocd-linux-amd64 \
+    && sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd \
+    && rm argocd-linux-amd64
+
 
 
 ARG NONROOT_USER=vscode
