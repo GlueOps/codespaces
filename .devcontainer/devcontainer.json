@@ -14,13 +14,40 @@
 
 
 	// Add the IDs of extensions you want installed when the container is created.
-	"extensions": [],
+	"extensions": [
+		"amazonwebservices.aws-toolkit-vscode",
+		"DavidAnson.vscode-markdownlint",
+		"dbaeumer.vscode-eslint",
+		"donjayamanne.python-extension-pack",
+		"esbenp.prettier-vscode",
+		"foxundermoon.shell-format",
+		"GitHub.codespaces",
+		"GitHub.copilot",
+		"GitHub.github-vscode-theme",
+		"GitHub.vscode-pull-request-github",
+		"golang.go",
+		"hashicorp.terraform",
+		"KevinRose.vsc-python-indent",
+		"magicstack.MagicPython",
+		"mohsen1.prettify-json",
+		"ms-azuretools.vscode-docker",
+		"ms-python.python",
+		"ms-python.vscode-pylance",
+		"ms-vscode.makefile-tools",
+		"mtxr.sqltools",
+		"mtxr.sqltools-driver-mysql",
+		"mtxr.sqltools-driver-pg",
+		"smoore.yaml-path",
+		"tht13.python",
+		"yzhang.markdown-all-in-one"
+	  ],
+	  
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "uname -a",
+	"postCreateCommand": "gh extension install dlvhdr/gh-dash && gh extension install meiji163/gh-notify && gh extension install gabe565/gh-profile && gh extension install HaywardMorihara/gh-tidy",
 
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode",
@@ -38,6 +65,6 @@
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
-		"golang": "1.19.8"
+		"golang": "1.19.9"
 	}
 }
