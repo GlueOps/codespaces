@@ -2,6 +2,8 @@
 
 # [Choice] Ubuntu version (use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon): ubuntu-22.04, ubuntu-20.04, ubuntu-18.04
 ARG VARIANT="jammy"
+#https://mcr.microsoft.com/v2/devcontainers/base/tags/list
+#https://github.com/devcontainers/images/tree/main/src/base-ubuntu
 FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 
 # [Optional] Uncomment this section to install additional OS packages.
@@ -11,16 +13,17 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 
-ARG VERSION_KUBECTL=1.26.3
-ARG VERSION_TERRAFORM=1.4.5
+ARG VERSION_KUBECTL=1.26.4
+ARG VERSION_TERRAFORM=1.4.6
 ARG VERSION_HELM=3.11.3
-ARG VERSION_GCLOUD_SDK=427.0.0
+ARG VERSION_GCLOUD_SDK=430.0.0
 ARG VERSION_TASKFILE=3.24.0
 ARG VERSION_KIND=1.18.0
-ARG VERSION_K9S=0.27.3
+ARG VERSION_K9S=0.27.4
 ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
-ARG VERSION_HELM_DIFF=3.6.0
+ARG VERSION_HELM_DIFF=3.7.0
+ARG VERSION_CHARM_GUM=0.10.0
 
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
@@ -73,6 +76,12 @@ RUN curl -Lo ./kubent-${VERSION_KUBENT}-linux-amd64.tar.gz https://github.com/do
     && chmod +x kubent \
     && mv kubent /usr/local/bin \
     && rm kubent-${VERSION_KUBENT}-linux-amd64.tar.gz
+RUN curl -Lo ./gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz https://github.com/charmbracelet/gum/releases/download/v${VERSION_CHARM_GUM}/gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz \
+    && tar --extract --file=gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz gum \
+    && chmod +x gum \
+    && mv gum /usr/local/bin \
+    && rm gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz
+
 
 ARG NONROOT_USER=vscode
 RUN echo "#!/bin/sh\n\
