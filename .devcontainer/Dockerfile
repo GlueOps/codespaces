@@ -10,13 +10,11 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-# https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
-# https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
-
+ENV GLUEOPS_CODESPACES_VERSION=v0.27.0
 ARG VERSION_KUBECTL=1.27.3
-ARG VERSION_TERRAFORM=1.5.2
-ARG VERSION_HELM=3.12.1
-ARG VERSION_GCLOUD_SDK=437.0.1
+ARG VERSION_TERRAFORM=1.5.3
+ARG VERSION_HELM=3.12.2
+ARG VERSION_GCLOUD_SDK=438.0.0
 ARG VERSION_TASKFILE=3.27.1
 ARG VERSION_KIND=0.20.0
 ARG VERSION_K9S=0.27.4
@@ -24,8 +22,10 @@ ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.8.1
 ARG VERSION_CHARM_GUM=0.10.0
-ARG VERSION_ARGO_CD_CLI=2.7.6
+ARG VERSION_ARGO_CD_CLI=2.7.7
 
+# https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
+# https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
