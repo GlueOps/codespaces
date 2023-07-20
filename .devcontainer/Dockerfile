@@ -22,7 +22,7 @@ ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.8.1
 ARG VERSION_CHARM_GUM=0.10.0
-ARG VERSION_ARGO_CD_CLI=2.7.7
+ARG VERSION_ARGO_CD_CLI=2.7.8
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
