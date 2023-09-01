@@ -57,9 +57,9 @@
 		"github-cli": "latest",
 		"aws-cli": "latest",
 		"sshd": "latest",
-		"node": "18.16.1",
+		"node": "18.17.1",
 		"python": {
-			"version" : "3.11.4",
+			"version" : "3.11.5",
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
