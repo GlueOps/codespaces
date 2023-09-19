@@ -14,25 +14,22 @@ ENV GLUEOPS_CODESPACES_VERSION=v0.29.0
 ARG VERSION_KUBECTL=1.27.5
 ARG VERSION_TERRAFORM=1.5.5
 ARG VERSION_HELM=3.12.3
-ARG VERSION_GCLOUD_SDK=444.0.0
-ARG VERSION_TASKFILE=3.29.1
+ARG VERSION_GCLOUD_SDK=446.0.1
+ARG VERSION_TASKFILE=3.30.1
 ARG VERSION_KIND=0.20.0
 ARG VERSION_K9S=0.27.4
 ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.8.1
 ARG VERSION_CHARM_GUM=0.11.0
-ARG VERSION_ARGO_CD_CLI=2.7.10
+ARG VERSION_ARGO_CD_CLI=2.8.3
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
-ADD ../tools/glueops-fetch-repos /usr/bin/glueops-repo-fetch
-ADD ../tools/run-gha /usr/bin/run-gha
-RUN chmod +x \
-  /usr/bin/glueops-repo-fetch \
-  /usr/bin/run-gha
+ADD ../tools/add-to-bashrc.sh /tmp/add-to-bashrc.sh
+RUN chmod +x /tmp/add-to-bashrc.sh && ./tmp/add-to-bashrc.sh
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
     && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
