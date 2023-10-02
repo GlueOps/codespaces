@@ -59,7 +59,7 @@
 		"sshd": "latest",
 		"node": "18.17.1",
 		"python": {
-			"version" : "3.11.5",
+			"version" : "3.11.6",
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
