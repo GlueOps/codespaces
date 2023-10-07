@@ -9,7 +9,10 @@ add_tools_to_shells() {
     if [ -d "/home/vscode/.oh-my-zsh/custom" ]; then
         find . -type f ! -name "add-tools-to-shells.sh" -name "*.sh" \
             -exec sh -c 'file="{}"; cp "$file" "/home/vscode/.oh-my-zsh/custom/$(basename ${file%.sh}.zsh)"' \;
+    else
+        echo "/home/vscode/.oh-my-zsh/custom does not exist" >> /home/vscode/error_log.txt
     fi
+
 
 }
 
