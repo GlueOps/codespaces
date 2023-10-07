@@ -28,8 +28,8 @@ ARG VERSION_ARGO_CD_CLI=2.8.3
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
-COPY tools/ /tmp/tools
-RUN chmod +x /tmp/tools/add-tools-to-shells.sh && ./tmp/tools/add-tools-to-shells.sh
+COPY tools/ /etc/tools
+RUN chmod +x /etc/tools/add-tools-to-shells.sh && ./etc/tools/add-tools-to-shells.sh
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
     && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
