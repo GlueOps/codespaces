@@ -1,5 +1,3 @@
-#!/bin/bash
-
 create-ghcr-regcred() {
     gh_username=""
     gh_token=""

@@ -1,5 +1,3 @@
-#!/bin/bash
-
 glueops-fetch-repos() {
     #https://stackoverflow.com/a/68770988/4620962
     
