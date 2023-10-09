@@ -2,7 +2,7 @@
 
 add_tools_to_shells() {
     if [ -f "/home/vscode/.bashrc" ]; then
-        find /tmp/tools/ -type f ! -name "add-tools-to-shells.sh" ! -name "helm-repositories.yaml" \
+        find /etc/tools/ -type f ! -name "add-tools-to-shells.sh" ! -name "helm-repositories.yaml" \
             -exec sh -c 'echo >> /home/vscode/.bashrc; cat "{}" >> /home/vscode/.bashrc' \;
     fi
 
