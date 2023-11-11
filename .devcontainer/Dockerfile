@@ -138,7 +138,7 @@ RUN code --install-extension mtxr.sqltools-driver-mysql --extensions-dir /home/v
 RUN code --install-extension mtxr.sqltools-driver-pg --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension smoore.yaml-path --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension yzhang.markdown-all-in-one --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN mkdir -p /home/vscode/.vscode-server/extensions
+RUN mkdir -p /home/vscode/.vscode-server
 RUN ln -s /home/vscode/.vscode-remote/extensions /home/vscode/.vscode-server/extensions
 
 ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
