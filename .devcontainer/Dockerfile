@@ -53,7 +53,7 @@ RUN curl -sSL https://sdk.cloud.google.com | bash \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
     && apt update \
-    && apt install tmux dnsutils telnet iputils-ping jq certbot wget gpg apt-transport-https -y \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
     && apt clean -y
 RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v${VERSION_TASKFILE}/install-task.sh)" -- -d -b /usr/local/bin/
 #RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
@@ -86,6 +86,9 @@ RUN curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
     && sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg \
+    && apt update
+    && apt install code wget gpg apt-transport-https -y \
+    && apt clean -y
     && sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' \
     && rm -f packages.microsoft.gpg \
     && curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output vscode_cli.tar.gz \
