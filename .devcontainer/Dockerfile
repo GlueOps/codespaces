@@ -86,11 +86,11 @@ RUN curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
     && sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg \
-    && apt update
-    && apt install code wget gpg apt-transport-https -y \
-    && apt clean -y
     && sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' \
     && rm -f packages.microsoft.gpg \
+    && apt update \
+    && apt install code wget gpg apt-transport-https -y \
+    && apt clean -y \
     && curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output vscode_cli.tar.gz \
     && tar -xf vscode_cli.tar.gz \
     && rm vscode_cli.tar.gz
