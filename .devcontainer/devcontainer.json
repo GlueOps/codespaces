@@ -12,10 +12,6 @@
 	// Set *default* container specific settings.json values on container create.
 	"settings": {},
 
-	// this may need to be comented out if you are running the codespace outside of a custom VM and outside of github.com/glueops/glueops
-	"workspaceFolder": "/workspaces/glueops",
-
-
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode",
 	"features": {
