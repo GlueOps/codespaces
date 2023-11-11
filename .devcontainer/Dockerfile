@@ -114,6 +114,33 @@ RUN echo "#!/bin/sh\n\
 # The script will also execute CMD if you need to alter startup behaviors.
 
 USER vscode
+
+RUN code --install-extension DavidAnson.vscode-markdownlint --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension dbaeumer.vscode-eslint --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension donjayamanne.python-extension-pack --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension esbenp.prettier-vscode --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension foxundermoon.shell-format --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension GitHub.copilot --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension GitHub.github-vscode-theme --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension GitHub.vscode-pull-request-github --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension golang.go --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension hashicorp.terraform --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension KevinRose.vsc-python-indent --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension magicstack.MagicPython --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension mohsen1.prettify-json --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension ms-azuretools.vscode-docker --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension ms-python.python --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension ms-python.vscode-pylance --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension ms-vscode.makefile-tools --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension mtxr.sqltools --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension mtxr.sqltools-driver-mysql --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension mtxr.sqltools-driver-pg --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension smoore.yaml-path --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension yzhang.markdown-all-in-one --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN mkdir -p /home/vscode/.vscode-server/extensions
+RUN ln -s /home/vscode/.vscode-remote/extensions /home/vscode/.vscode-server/extensions
+
 ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v${VERSION_HELM_DIFF}/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
