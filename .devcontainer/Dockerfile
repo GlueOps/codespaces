@@ -23,6 +23,7 @@ ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.8.1
 ARG VERSION_CHARM_GUM=0.11.0
 ARG VERSION_ARGO_CD_CLI=2.8.6
+ARG VERSION_K3D=5.6.0
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -39,7 +40,9 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && curl -Lo helm.tar.gz https://get.helm.sh/helm-v${VERSION_HELM}-linux-amd64.tar.gz \
     && tar -xvf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin \
-    && rm -rf linux-amd64 helm.tar.gz
+    && rm -rf linux-amd64 helm.tar.gz \
+    && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} bash
+
 
 ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
 # Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
