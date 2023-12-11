@@ -10,25 +10,23 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-ENV GLUEOPS_CODESPACES_VERSION=v0.31.3
-ARG VERSION_KUBECTL=1.27.7
+ENV GLUEOPS_CODESPACES_VERSION=v0.32.0
+ARG VERSION_KUBECTL=1.27.8
 ARG VERSION_TERRAFORM=1.5.5
 ARG VERSION_HELM=3.13.2
-ARG VERSION_GCLOUD_SDK=453.0.0
 ARG VERSION_TASKFILE=3.30.1
 ARG VERSION_KIND=0.20.0
-ARG VERSION_K9S=0.27.4
+ARG VERSION_K9S=0.29.1
 ARG VERSION_TERRAFORM_DOCS=0.16.0
 ARG VERSION_KUBENT=0.7.0
 ARG VERSION_HELM_DIFF=3.8.1
-ARG VERSION_CHARM_GUM=0.11.0
-ARG VERSION_ARGO_CD_CLI=2.8.6
+ARG VERSION_CHARM_GUM=0.12.0
+ARG VERSION_ARGO_CD_CLI=2.8.7
 ARG VERSION_K3D=5.6.0
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
-ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 COPY tools/ /etc/tools
 RUN chmod +x /etc/tools/add-tools-to-shells.sh && ./etc/tools/add-tools-to-shells.sh
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
@@ -44,23 +42,10 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} bash
 
 
-ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
-# Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
-RUN curl -sSL https://sdk.cloud.google.com | bash \
-    && export PATH=$PATH:/usr/local/gcloud/google-cloud-sdk/bin \
-    && gcloud components install gke-gcloud-auth-plugin --quiet \
-    && gcloud components install alpha --quiet \
-    && gcloud components install beta --quiet \
-    && rm -rf $(find /usr/local/gcloud/google-cloud-sdk/ -regex ".*/__pycache__") \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/.install/.backup \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
-    && apt update \
+RUN apt update \
     && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
     && apt clean -y
 RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v${VERSION_TASKFILE}/install-task.sh)" -- -d -b /usr/local/bin/
-#RUN curl https://stedolan.github.io/jq/download/linux64/jq > /usr/local/bin/jq && sudo chmod +x /usr/local/bin/jq
-ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v${VERSION_KIND}/kind-linux-amd64 \
     && chmod +x /usr/local/bin/kind
 RUN wget https://github.com/derailed/k9s/releases/download/v${VERSION_K9S}/k9s_Linux_amd64.tar.gz \
