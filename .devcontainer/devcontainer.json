@@ -22,12 +22,12 @@
 		"github-cli": "latest",
 		"aws-cli": "latest",
 		"sshd": "latest",
-		"node": "18.17.1",
+		"node": "18.19.0",
 		"python": {
-			"version" : "3.11.6",
+			"version" : "3.11.7",
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
-		"golang": "1.21.1"
+		"golang": "1.21.3"
 	}
 }
