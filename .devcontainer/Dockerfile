@@ -10,7 +10,6 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-ENV GLUEOPS_CODESPACES_VERSION=v0.32.0
 ARG VERSION_KUBECTL=1.27.8
 ARG VERSION_TERRAFORM=1.5.5
 ARG VERSION_HELM=3.13.2
