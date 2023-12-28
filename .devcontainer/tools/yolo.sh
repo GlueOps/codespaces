@@ -16,7 +16,7 @@ yolo() {
         git_email=$(gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" /user/emails | jq '.[] | select(.primary == true) | .email' -r)
         git_name=$(gh api user | jq '.name' -r)
         git config --global user.email "${git_email}"
-        git config --global user.name "$git_name"
+        git config --global user.name "${git_name}"
         git config --global core.autocrlf input
     fi
 }
