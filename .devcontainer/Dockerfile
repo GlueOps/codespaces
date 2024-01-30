@@ -13,6 +13,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 ARG VERSION_KUBECTL=1.27.9
 ARG VERSION_TERRAFORM=1.5.5
 ARG VERSION_HELM=3.13.3
+ARG VERSION_GCLOUD_SDK=461.0.0
 ARG VERSION_TASKFILE=3.33.0
 ARG VERSION_KIND=0.20.0
 ARG VERSION_K9S=0.30.6
@@ -26,6 +27,8 @@ ARG VERSION_K3D=5.6.0
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
+ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
+
 COPY tools/ /etc/tools
 RUN chmod +x /etc/tools/add-tools-to-shells.sh && ./etc/tools/add-tools-to-shells.sh
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
@@ -40,6 +43,22 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && rm -rf linux-amd64 helm.tar.gz \
     && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} bash
 
+
+ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
+# Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
+RUN curl -sSL https://sdk.cloud.google.com | bash \
+    && export PATH=$PATH:/usr/local/gcloud/google-cloud-sdk/bin \
+    && gcloud components install gke-gcloud-auth-plugin --quiet \
+    && gcloud components install alpha --quiet \
+    && gcloud components install beta --quiet \
+    && rm -rf $(find /usr/local/gcloud/google-cloud-sdk/ -regex ".*/__pycache__") \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/.install/.backup \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
+    && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
+    && apt update \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
+    && apt clean -y
+ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 
 RUN apt update \
     && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
