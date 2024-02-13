@@ -10,18 +10,18 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-ARG VERSION_KUBECTL=1.27.9
+ARG VERSION_KUBECTL=1.27.10
 ARG VERSION_TERRAFORM=1.5.5
-ARG VERSION_HELM=3.13.3
-ARG VERSION_GCLOUD_SDK=461.0.0
-ARG VERSION_TASKFILE=3.33.0
-ARG VERSION_KIND=0.20.0
-ARG VERSION_K9S=0.30.6
+ARG VERSION_HELM=3.14.0
+ARG VERSION_GCLOUD_SDK=463.0.0
+ARG VERSION_TASKFILE=3.34.1
+ARG VERSION_KIND=0.21.0
+ARG VERSION_K9S=0.31.8
 ARG VERSION_TERRAFORM_DOCS=0.17.0
 ARG VERSION_KUBENT=0.7.1
-ARG VERSION_HELM_DIFF=3.8.1
+ARG VERSION_HELM_DIFF=3.9.4
 ARG VERSION_CHARM_GUM=0.13.0
-ARG VERSION_ARGO_CD_CLI=2.8.7
+ARG VERSION_ARGO_CD_CLI=2.8.10
 ARG VERSION_K3D=5.6.0
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
@@ -127,7 +127,6 @@ RUN code --install-extension donjayamanne.python-extension-pack --extensions-dir
 RUN code --install-extension esbenp.prettier-vscode --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension foxundermoon.shell-format --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension GitHub.copilot --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.github-vscode-theme --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.vscode-pull-request-github --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension golang.go --extensions-dir /home/vscode/.vscode-remote/extensions
