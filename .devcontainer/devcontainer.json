@@ -22,7 +22,6 @@
 		"github-cli": "latest",
 		"aws-cli": "latest",
 		"sshd": "latest",
-		"node": "18.19.0",
 		"python": {
 			"version" : "3.11.8",
 			"installTools" : true,
