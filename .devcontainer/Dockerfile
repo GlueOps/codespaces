@@ -127,7 +127,6 @@ RUN code --install-extension donjayamanne.python-extension-pack --extensions-dir
 RUN code --install-extension esbenp.prettier-vscode --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension foxundermoon.shell-format --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension GitHub.copilot --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.github-vscode-theme --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.vscode-pull-request-github --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension golang.go --extensions-dir /home/vscode/.vscode-remote/extensions
