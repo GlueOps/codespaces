@@ -10,7 +10,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-ARG VERSION_KUBECTL=1.27.9
+ARG VERSION_KUBECTL=1.27.10
 ARG VERSION_TERRAFORM=1.5.5
 ARG VERSION_HELM=3.14.0
 ARG VERSION_GCLOUD_SDK=463.0.0
