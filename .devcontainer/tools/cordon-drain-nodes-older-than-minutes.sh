@@ -27,8 +27,8 @@ cordon-drain-nodes-older-than-minutes() {
       esac
     done
 
-    CURRENT_DATE=$(date +%s)
 
+    CURRENT_DATE=$(date +%s)
 
     NODES=$(kubectl get nodes -o json | jq --arg CURRENT_DATE "$CURRENT_DATE" --arg THRESHOLD_MINUTES "$threshold_minutes" -r '
     .items[] |
