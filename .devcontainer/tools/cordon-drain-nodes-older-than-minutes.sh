@@ -63,9 +63,10 @@ cordon-drain-nodes-older-than-minutes() {
     if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo "$NODES" | while IFS= read -r node; do
             echo "Draining node: $node"
-            kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data
-            echo ""
+            kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data > "drain-${node}.log" 2>&1 &
         done
+        wait
+        echo "All nodes drained."
     else
         echo "Draining skipped."
     fi
