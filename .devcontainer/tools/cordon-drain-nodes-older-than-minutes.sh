@@ -1,6 +1,7 @@
 #!/bin/bash
 
 cordon-drain-nodes-older-than-minutes() {
+    set -e
     threshold_minutes=""
 
     while [[ $# -gt 0 ]]; do
