@@ -11,7 +11,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:0-${VARIANT}
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 ARG VERSION_KUBECTL=1.27.10
-ARG VERSION_TERRAFORM=1.5.5
+ARG VERSION_OPENTOFU=1.6.2
 ARG VERSION_HELM=3.14.1
 ARG VERSION_GCLOUD_SDK=463.0.0
 ARG VERSION_TASKFILE=3.34.1
@@ -33,10 +33,11 @@ COPY tools/ /etc/tools
 RUN chmod +x /etc/tools/add-tools-to-shells.sh && ./etc/tools/add-tools-to-shells.sh
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
-    && curl -Lo terraform_${VERSION_TERRAFORM}_linux_amd64.zip https://releases.hashicorp.com/terraform/${VERSION_TERRAFORM}/terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
-    && unzip terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
-    && mv terraform /usr/local/bin \
-    && rm terraform_${VERSION_TERRAFORM}_linux_amd64.zip \
+    && curl -Lo tofu_${VERSION_OPENTOFU}_linux_amd64.zip https://github.com/opentofu/opentofu/releases/download/v${VERSION_OPENTOFU}/tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
+    && unzip tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
+    && mv tofu /usr/local/bin \
+    && rm tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
+    && ln -s /usr/local/bin/tofu /usr/local/bin/terraform \
     && curl -Lo helm.tar.gz https://get.helm.sh/helm-v${VERSION_HELM}-linux-amd64.tar.gz \
     && tar -xvf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin \
