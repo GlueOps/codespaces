@@ -22,7 +22,7 @@ jobs:
         uses: rlespinasse/github-slug-action@v3.x
 
       - name: Build and run dev container task
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@7957e0cf6d027a8ab027745f399fcdbd3aa74f0f # v0.3
         with:
           imageName: ghcr.io/${{ env.GITHUB_REPOSITORY_OWNER_PART_SLUG }}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}
           imageTag: ${{ env.GITHUB_REF_SLUG }}
