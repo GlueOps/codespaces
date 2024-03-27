@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 cordon-drain-nodes-older-than-minutes() {
     threshold_minutes=""

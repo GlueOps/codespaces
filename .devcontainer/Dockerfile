@@ -42,12 +42,12 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && tar -xvf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin \
     && rm -rf linux-amd64 helm.tar.gz \
-    && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} bash
+    && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} zsh
 
 
 ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
 # Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
-RUN curl -sSL https://sdk.cloud.google.com | bash \
+RUN curl -sSL https://sdk.cloud.google.com | zsh \
     && export PATH=$PATH:/usr/local/gcloud/google-cloud-sdk/bin \
     && gcloud components install gke-gcloud-auth-plugin --quiet \
     && gcloud components install alpha --quiet \

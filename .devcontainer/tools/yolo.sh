@@ -1,3 +1,5 @@
+#!/bin/zsh
+
 yolo() {
     # Always unset GITHUB_TOKEN
     unset GITHUB_TOKEN
