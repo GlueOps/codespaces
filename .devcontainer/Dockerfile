@@ -81,10 +81,11 @@ RUN curl -Lo ./kubent-${VERSION_KUBENT}-linux-amd64.tar.gz https://github.com/do
     && mv kubent /usr/local/bin \
     && rm kubent-${VERSION_KUBENT}-linux-amd64.tar.gz
 RUN curl -Lo ./gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz https://github.com/charmbracelet/gum/releases/download/v${VERSION_CHARM_GUM}/gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz \
-    && tar --extract --file=gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz gum \
+    && tar -xzvf gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz && mv gum_*/gum gum \
     && chmod +x gum \
     && mv gum /usr/local/bin \
-    && rm gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz
+    && rm gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz \
+    && rm -rf gum_${VERSION_CHARM_GUM}_Linux_x86_64
 RUN curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v${VERSION_ARGO_CD_CLI}/argocd-linux-amd64 \
     && sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd \
     && rm argocd-linux-amd64
