@@ -14,7 +14,6 @@
 
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode",
-	"runArgs": ["--device=/dev/net/tun"],
 	"features": {
 		"ghcr.io/tailscale/codespace/tailscale": {
     			"version": "latest"
