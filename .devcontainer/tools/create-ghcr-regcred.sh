@@ -40,7 +40,6 @@ create-ghcr-regcred() {
         return
     fi
 
-    set -e
     b64_enc_regcred=$(echo -n "$gh_username:$gh_token" | base64)
 
     echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$b64_enc_regcred\"}}}"
