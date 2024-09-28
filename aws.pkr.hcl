@@ -33,7 +33,7 @@ source "amazon-ebs" "cde" {
     delete_on_termination = true
   }
   ami_virtualization_type = "hvm"
-  ami_regions             = ["us-east-1"] #["us-west-2", "us-east-2", "ap-south-1", "eu-central-1" ]
+  ami_regions             = ["us-west-2", "us-east-2", "ap-south-1", "eu-central-1" ]
 
   ami_name = "${var.glueops_codespaces_container_tag}"
 }
