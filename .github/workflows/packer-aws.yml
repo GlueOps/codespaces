@@ -1,4 +1,4 @@
-name: Packer build Hetzner
+name: Packer build AWS
 
 on:
   workflow_run:
