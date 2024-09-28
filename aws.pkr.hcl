@@ -14,7 +14,7 @@ variable "glueops_codespaces_container_tag" {
 source "amazon-ebs" "cde" {
   access_key = "${var.aws_access_key}"
   secret_key = "${var.aws_secret_key}"
-  region     = "us-east-1"
+  region     = "us-west-2"
   source_ami_filter {
     filters = {
       virtualization-type = "hvm"
