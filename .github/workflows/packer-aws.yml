@@ -1,0 +1,27 @@
+name: Packer build Hetzner
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish devcontainer image"]
+    types:
+      - completed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Setup `packer`
+        uses: hashicorp/setup-packer@1aa358be5cf73883762b302a3a03abd66e75b232 # v3.1.0
+        id: setup
+        with:
+          version: 1.11.2
+
+      - name: Run `packer init`
+        id: init
+        run: packer init aws.pkr.hcl
+
+      - name: Run `packer build`
+        id: build
+        run: packer build -var aws_access_key=${{ secrets.AWS_ACCESS_KEY }} -var aws_secret_key=${{ secrets.AWS_SECRET_KEY }} -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} aws.pkr.hcl
