@@ -102,7 +102,8 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && tar -xf vscode_cli.tar.gz \
     && rm vscode_cli.tar.gz
 
-
+#AWS Debian has a user of admin that uses the UID of 1000. THis is to try and fix that. We are also using UID of 1337 on the system/host level here: https://github.com/GlueOps/development-only-utilities/blob/main/tools/developer-setup/linux-setup.sh#L8
+RUN usermod --uid 1337 vscode
 
 ARG NONROOT_USER=vscode
 RUN echo "#!/bin/sh\n\
