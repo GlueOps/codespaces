@@ -50,17 +50,15 @@ build {
 
   provisioner "shell" {
     scripts = [
-      "os-setup.sh",
+      "os-setup-start.sh",
+      "developer-setup.sh",
+      "os-setup-finish.sh",
+      
     ]
     env = {
       BUILDER = "packer"
+      GLUEOPS_CODESPACES_CONTAINER_TAG = var.glueops_codespaces_container_tag
     }
-  }
-
-  provisioner "shell" {
-    inline = [
-      "sudo docker pull ghcr.io/glueops/codespaces:${var.glueops_codespaces_container_tag}",
-    ]
   }
 
 }
