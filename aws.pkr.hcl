@@ -1,19 +1,9 @@
-variable "aws_access_key" {
-  type = string
-}
-
-variable "aws_secret_key" {
-  type = string
-}
-
 #https://github.com/GlueOps/codespaces/pkgs/container/codespaces
 variable "glueops_codespaces_container_tag" {
   type    = string
 }
 
 source "amazon-ebs" "cde" {
-  access_key = "${var.aws_access_key}"
-  secret_key = "${var.aws_secret_key}"
   region     = "us-west-2"
   source_ami_filter {
     filters = {
@@ -21,7 +11,7 @@ source "amazon-ebs" "cde" {
       name                = "debian-12-amd64-*"
       root-device-type    = "ebs"
     }
-    owners      = ["136693071363"]
+    owners      = ["136693071363"] # Amazon
     most_recent = true
   }
   instance_type = "t3a.large"
@@ -50,17 +40,15 @@ build {
 
   provisioner "shell" {
     scripts = [
-      "os-setup.sh",
+      "os-setup-start.sh",
+      "developer-setup.sh",
+      "os-setup-finish.sh",
+      
     ]
     env = {
       BUILDER = "packer"
+      GLUEOPS_CODESPACES_CONTAINER_TAG = var.glueops_codespaces_container_tag
     }
-  }
-
-  provisioner "shell" {
-    inline = [
-      "sudo docker pull ghcr.io/glueops/codespaces:${var.glueops_codespaces_container_tag}",
-    ]
   }
 
 }
