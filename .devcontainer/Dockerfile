@@ -9,7 +9,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:6e3f4d480
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
-ARG VERSION_KUBECTL=1.29.9
+ARG VERSION_KUBECTL=1.30.5
 ARG VERSION_OPENTOFU=1.7.3
 ARG VERSION_HELM=3.15.4
 ARG VERSION_GCLOUD_SDK=489.0.0
