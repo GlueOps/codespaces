@@ -25,5 +25,5 @@ jobs:
         uses: devcontainers/ci@a56d055efecd725e8cfe370543b6071b79989cc8 # v0.3
         with:
           imageName: ghcr.io/${{ env.GITHUB_REPOSITORY_OWNER_PART_SLUG }}/${{ env.GITHUB_REPOSITORY_NAME_PART_SLUG }}
-          imageTag: ${{ env.GITHUB_REF_SLUG }}
+          imageTag: ${{ env.GITHUB_REF_SLUG }},latest
           push: always
