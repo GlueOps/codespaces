@@ -22,6 +22,7 @@ It's best to just reference the github workflows under `.github/workflows` the p
 ```bash
 export AWS_ACCESS_KEY_ID="XXXXXXXXXXXXXXXXX"
 export AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXX"
+packer init aws.pkr.hcl
 packer build -var glueops_codespaces_container_tag=v0.52.0 aws.pkr.hcl
 ```
 
@@ -29,6 +30,7 @@ packer build -var glueops_codespaces_container_tag=v0.52.0 aws.pkr.hcl
 
 ```bash
 export HCLOUD_TOKEN="XXXXXXXXXXXXXXXXX"
+packer init hetzner.pkr.hcl
 packer build -var glueops_codespaces_container_tag=v0.52.0 hetzner.pkr.hcl
 ```
 
