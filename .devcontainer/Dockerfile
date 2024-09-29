@@ -22,6 +22,7 @@ ARG VERSION_HELM_DIFF=3.9.10
 ARG VERSION_CHARM_GUM=0.14.5
 ARG VERSION_ARGO_CD_CLI=2.10.17
 ARG VERSION_K3D=5.7.4
+ARG VERSION_HASHICORP_PACKER=1.11.2
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -89,6 +90,11 @@ RUN curl -Lo ./gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz https://github.com/c
 RUN curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/download/v${VERSION_ARGO_CD_CLI}/argocd-linux-amd64 \
     && sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd \
     && rm argocd-linux-amd64
+RUN wget "https://releases.hashicorp.com/packer/${VERSION_HASHICORP_PACKER}/packer_${VERSION_HASHICORP_PACKER}_linux_amd64.zip" \
+    && unzip packer_${VERSION_HASHICORP_PACKER}_linux_amd64.zip \
+    && mv packer /usr/local/bin \
+    && rm packer_${VERSION_HASHICORP_PACKER}_linux_amd64.zip \
+    && rm LICENSE.txt
 
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
