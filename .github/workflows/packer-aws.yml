@@ -24,4 +24,7 @@ jobs:
 
       - name: Run `packer build`
         id: build
-        run: packer build -var aws_access_key=${{ secrets.AWS_ACCESS_KEY }} -var aws_secret_key=${{ secrets.AWS_SECRET_KEY }} -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} aws.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} aws.pkr.hcl
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
