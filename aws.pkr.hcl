@@ -14,6 +14,7 @@ source "amazon-ebs" "cde" {
     owners      = ["136693071363"] # Amazon
     most_recent = true
   }
+  ami_groups    = ["all"]
   instance_type = "t3a.large"
   ssh_username  = "admin"
   launch_block_device_mappings {
