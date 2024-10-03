@@ -8,13 +8,30 @@ variable "glueops_codespaces_container_tag" {
   type = string
 }
 
-source "hcloud" "base-amd64" {
+# Build the stage image
+source "hcloud" "base-amd64-stage" {
   image         = var.base_image
   location      = "nbg1"
   server_type   = "cx11"
   server_name   = "packer-${var.glueops_codespaces_container_tag}"
   ssh_username  = "root"
   snapshot_name = "${var.glueops_codespaces_container_tag}"
+  token         = env("HCLOUD_TOKEN_STAGE")
+  snapshot_labels = {
+    base    = var.base_image,
+    version = var.glueops_codespaces_container_tag
+  }
+}
+
+#Build the prod image
+source "hcloud" "base-amd64-prod" {
+  image         = var.base_image
+  location      = "nbg1"
+  server_type   = "cx11"
+  server_name   = "packer-${var.glueops_codespaces_container_tag}"
+  ssh_username  = "root"
+  snapshot_name = "${var.glueops_codespaces_container_tag}"
+  token         = env("HCLOUD_TOKEN_PROD")
   snapshot_labels = {
     base    = var.base_image,
     version = var.glueops_codespaces_container_tag
@@ -22,7 +39,10 @@ source "hcloud" "base-amd64" {
 }
 
 build {
-  sources = ["source.hcloud.base-amd64"]
+  sources = [
+    "source.hcloud.base-amd64-stage",
+    "source.hcloud.base-amd64-prod"
+  ]
   provisioner "shell" {
     scripts = [
       "os-setup-start.sh",
