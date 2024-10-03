@@ -27,4 +27,5 @@ jobs:
         id: build
         run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} hetzner.pkr.hcl
         env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          HCLOUD_TOKEN_STAGE: ${{ secrets.HCLOUD_TOKEN_STAGE }}
+          HCLOUD_TOKEN_PROD: ${{ secrets.HCLOUD_TOKEN_PROD }}
