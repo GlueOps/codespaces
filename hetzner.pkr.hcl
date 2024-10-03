@@ -8,6 +8,14 @@ variable "glueops_codespaces_container_tag" {
   type = string
 }
 
+variable "token_stage" {
+  default = env("HCLOUD_TOKEN_STAGE")
+}
+
+variable "token_prod" {
+  default = env("HCLOUD_TOKEN_PROD")
+}
+
 # Build the stage image
 source "hcloud" "base-amd64-stage" {
   image         = var.base_image
@@ -16,7 +24,7 @@ source "hcloud" "base-amd64-stage" {
   server_name   = "packer-${var.glueops_codespaces_container_tag}"
   ssh_username  = "root"
   snapshot_name = "${var.glueops_codespaces_container_tag}"
-  token         = env("HCLOUD_TOKEN_STAGE")
+  token         = "${var.token_stage}"
   snapshot_labels = {
     base    = var.base_image,
     version = var.glueops_codespaces_container_tag
@@ -31,7 +39,7 @@ source "hcloud" "base-amd64-prod" {
   server_name   = "packer-${var.glueops_codespaces_container_tag}"
   ssh_username  = "root"
   snapshot_name = "${var.glueops_codespaces_container_tag}"
-  token         = env("HCLOUD_TOKEN_PROD")
+  token         = "${var.token_prod}"
   snapshot_labels = {
     base    = var.base_image,
     version = var.glueops_codespaces_container_tag
