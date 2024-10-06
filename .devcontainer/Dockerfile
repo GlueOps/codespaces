@@ -29,8 +29,19 @@ ARG VERSION_HASHICORP_PACKER=1.11.2
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 
-COPY tools/ /etc/tools
-RUN chmod +x /etc/tools/add-tools-to-shells.sh && ./etc/tools/add-tools-to-shells.sh
+COPY tools/ /etc/tools/
+
+# Install tools to /usr/local/bin
+RUN for file in /etc/tools/*; do \
+        if [ -f "$file" ]; then \
+            new_name=$(basename "$file" .sh); \
+            cp "$file" "/usr/local/bin/$new_name"; \
+            chmod +x "/usr/local/bin/$new_name"; \
+            echo "Copied and made executable: $new_name"; \
+        fi; \
+    done && \
+    rm -rf /etc/tools
+    
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
     && curl -Lo tofu_${VERSION_OPENTOFU}_linux_amd64.zip https://github.com/opentofu/opentofu/releases/download/v${VERSION_OPENTOFU}/tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
@@ -109,7 +120,7 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && rm vscode_cli.tar.gz
 
 #AWS Debian has a user of admin that uses the UID of 1000. THis is to try and fix that. We are also using UID of 1337 on the system/host level here: https://github.com/GlueOps/development-only-utilities/blob/main/tools/developer-setup/linux-setup.sh#L8
-RUN usermod --uid 1337 vscode
+RUN usermod --uid 1337 vscode --shell /bin/zsh
 
 ARG NONROOT_USER=vscode
 RUN echo "#!/bin/sh\n\
@@ -154,7 +165,7 @@ RUN code --install-extension yzhang.markdown-all-in-one --extensions-dir /home/v
 RUN mkdir -p /home/vscode/.vscode-server
 RUN ln -s /home/vscode/.vscode-remote/extensions /home/vscode/.vscode-server/extensions
 
-ADD ../tools/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
+ADD ../misc-configs/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v${VERSION_HELM_DIFF}/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
