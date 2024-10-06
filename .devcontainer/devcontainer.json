@@ -26,7 +26,7 @@
 		"aws-cli": "latest",
 		"sshd": "latest",
 		"python": {
-			"version" : "3.11.8",
+			"version" : "3.11.10",
 			"installTools" : true,
 			"installJupyterlab" : true
 		},
