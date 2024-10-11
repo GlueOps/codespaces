@@ -61,7 +61,7 @@ build {
       "rm ci-data.iso",
       "rm user-data",
       "rm meta-data",
-      "rm images/${var.glueops_codespaces_container_tag}.qcow2"
+      "rm images/${var.glueops_codespaces_container_tag}.qcow2",
       "mv images/${var.glueops_codespaces_container_tag}-compressed.qcow2 images/${var.glueops_codespaces_container_tag}.qcow2"
     ]
   }
