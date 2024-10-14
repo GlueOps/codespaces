@@ -65,11 +65,17 @@ fi
 echo -n "Drain the cordoned nodes? (y/N) "
 read -r response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo "$NODES" | while IFS= read -r node; do
+    pids=()
+    while IFS= read -r node; do  # Process substitution to avoid subshell
         echo "Draining node: $node"
         kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data > "drain-${node}.log" 2>&1 &
+        pids+=($!)
+    done < <(echo "$NODES") # Process substitution
+    # Wait for all PIDs
+    for pid in "${pids[@]}"; do
+        echo "$pid" # Debugging output (optional)
+        wait "$pid"
     done
-    wait
     echo "All nodes drained."
 else
     echo "Draining skipped."
