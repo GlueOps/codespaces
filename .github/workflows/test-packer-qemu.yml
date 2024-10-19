@@ -40,7 +40,7 @@ jobs:
 
       - name: Run packer build
         id: build
-        run: packer build -var glueops_codespaces_container_tag=0.62.0 qemu.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=v0.62.0 qemu.pkr.hcl
 
       - uses: ryand56/r2-upload-action@latest
         with:
@@ -48,5 +48,5 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: images/0.62.0.qcow2
+          source-dir: images/v0.62.0.qcow2
           destination-dir: ./
