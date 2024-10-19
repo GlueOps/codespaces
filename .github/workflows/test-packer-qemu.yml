@@ -1,0 +1,23 @@
+name: Packer build qemu
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: codespaces
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Generate cloud-init iso
+        run: |
+          touch test.txt      
+
+      - uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: test.txt
+          destination-dir: ./
