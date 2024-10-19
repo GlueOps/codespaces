@@ -41,3 +41,13 @@ jobs:
       - name: Run packer build
         id: build
         run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} qemu.pkr.hcl
+
+      - uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: images/${{ github.event.workflow_run.head_branch }}.qcow2
+          destination-dir: ./
+          

@@ -1,7 +1,10 @@
 name: Packer build qemu
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Build and Publish devcontainer image"]
+    types:
+      - completed
 
 jobs:
   build:
@@ -9,9 +12,35 @@ jobs:
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
+      - name: Setup packer
+        uses: hashicorp/setup-packer@1aa358be5cf73883762b302a3a03abd66e75b232 # v3.1.0
+        id: setup
+        with:
+          version: 1.11.2
+
       - name: Generate cloud-init iso
         run: |
-          touch test.txt      
+          sudo apt install genisoimage
+          echo '#cloud-config
+          chpasswd:
+            expire: False
+            users:
+            - {name: debian, password: password, type: text}
+          ssh_pwauth: True' > user-data
+          echo 'instance-id: iid-local01
+          local-hostname: localhost' > meta-data
+          genisoimage -output ci-data.iso -volid cidata -joliet -rock user-data meta-data
+      
+      - name: Install qemu
+        run: sudo apt-get update && sudo apt-get install qemu-system -y
+      
+      - name: Run packer init
+        id: init
+        run: packer init qemu.pkr.hcl
+
+      - name: Run packer build
+        id: build
+        run: packer build -var glueops_codespaces_container_tag=0.62.0 qemu.pkr.hcl
 
       - uses: ryand56/r2-upload-action@latest
         with:
@@ -19,5 +48,5 @@ jobs:
           r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
           r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: test.txt
+          source-dir: images/0.62.0.qcow2
           destination-dir: ./
