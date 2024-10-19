@@ -1,10 +1,7 @@
 name: Packer build qemu
 
 on:
-  workflow_run:
-    workflows: ["Build and Publish devcontainer image"]
-    types:
-      - completed
+  push:
 
 jobs:
   build:
