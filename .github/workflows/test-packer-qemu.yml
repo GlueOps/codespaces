@@ -19,7 +19,7 @@ jobs:
       - name: copy file to s3 storage
         run: |
           touch test.txt
-          aws s3 cp test.txt s3://${{ secrets.S3_BUCKET }}/test.txt --acl public-read
+          aws s3 cp test.txt s3://${{ secrets.S3_BUCKET }}/test.txt
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
