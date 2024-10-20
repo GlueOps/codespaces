@@ -1,0 +1,27 @@
+name: Packer build qemu
+
+on:
+  push:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - id: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2                         # default
+          verbose: false                     # default
+          arch: amd64                        # allowed values: amd64, arm64
+
+      - name: copy file to s3 storage
+        run: |
+          touch test.txt
+          aws s3 cp test.txt s3://${{ secrets.S3_BUCKET }}/test.txt --acl public-read
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_BUCKET_REGION }}
+          
