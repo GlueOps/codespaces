@@ -5,23 +5,53 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: codespaces
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Setup packer
+        uses: hashicorp/setup-packer@1aa358be5cf73883762b302a3a03abd66e75b232 # v3.1.0
+        id: setup
+        with:
+          version: 1.11.2
+
+      - name: Generate cloud-init iso
+        run: |
+          sudo apt install genisoimage
+          echo '#cloud-config
+          chpasswd:
+            expire: False
+            users:
+            - {name: debian, password: password, type: text}
+          ssh_pwauth: True' > user-data
+          echo 'instance-id: iid-local01
+          local-hostname: localhost' > meta-data
+          genisoimage -output ci-data.iso -volid cidata -joliet -rock user-data meta-data
+      
+      - name: Install qemu
+        run: sudo apt-get update && sudo apt-get install qemu-system -y
+      
+      - name: Run packer init
+        id: init
+        run: packer init qemu.pkr.hcl
+
+      - name: Run packer build
+        id: build
+        run: packer build -var glueops_codespaces_container_tag=v0.62.0 qemu.pkr.hcl
 
       - id: install-aws-cli
         uses: unfor19/install-aws-cli-action@v1
         with:
-          version: 2                         # default
-          verbose: false                     # default
-          arch: amd64                        # allowed values: amd64, arm64
+          version: 2
+          verbose: false
+          arch: amd64 
 
       - name: copy file to s3 storage
         run: |
-          touch test.txt
-          aws s3 cp test.txt s3://${{ secrets.S3_BUCKET }}/test.txt
+          aws s3 cp images/v0.62.0.qcow2 s3://${{ secrets.S3_BUCKET }}/v0.62.0.qcow2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.S3_BUCKET_REGION }}
+          
           
