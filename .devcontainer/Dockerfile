@@ -140,28 +140,10 @@ RUN echo "#!/bin/sh\n\
 
 USER vscode
 
-RUN code --install-extension DavidAnson.vscode-markdownlint --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension dbaeumer.vscode-eslint --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension donjayamanne.python-extension-pack --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension esbenp.prettier-vscode --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension foxundermoon.shell-format --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension GitHub.github-vscode-theme --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension GitHub.vscode-pull-request-github --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension golang.go --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension hashicorp.terraform --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension KevinRose.vsc-python-indent --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension magicstack.MagicPython --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension mohsen1.prettify-json --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension ms-azuretools.vscode-docker --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension ms-python.python --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension ms-python.vscode-pylance --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension ms-vscode.makefile-tools --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension mtxr.sqltools --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension mtxr.sqltools-driver-mysql --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension mtxr.sqltools-driver-pg --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension smoore.yaml-path --extensions-dir /home/vscode/.vscode-remote/extensions
-RUN code --install-extension yzhang.markdown-all-in-one --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
+RUN curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
+
+
 RUN mkdir -p /home/vscode/.vscode-server
 RUN ln -s /home/vscode/.vscode-remote/extensions /home/vscode/.vscode-server/extensions
 

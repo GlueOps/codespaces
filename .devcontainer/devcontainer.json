@@ -24,12 +24,6 @@
 		"git-lfs": "latest",
 		"github-cli": "latest",
 		"aws-cli": "latest",
-		"sshd": "latest",
-		"python": {
-			"version" : "3.11.10",
-			"installTools" : true,
-			"installJupyterlab" : true
-		},
-		"golang": "1.21.3"
+		"sshd": "latest"
 	}
 }
