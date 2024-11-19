@@ -11,7 +11,7 @@ variable "glueops_codespaces_container_tag" {
 source "hcloud" "base-amd64" {
   image         = var.base_image
   location      = "nbg1"
-  server_type   = "cx11"
+  server_type   = "cx22"
   server_name   = "packer-${var.glueops_codespaces_container_tag}"
   ssh_username  = "root"
   snapshot_name = "${var.glueops_codespaces_container_tag}"
