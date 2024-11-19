@@ -140,6 +140,9 @@ RUN echo "#!/bin/sh\n\
 
 USER vscode
 
+RUN code --install-extension MS-vsliveshare.vsliveshare --extensions-dir /home/vscode/.vscode-remote/extensions
+RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
+
 RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
 RUN curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
 
