@@ -42,6 +42,6 @@ if [[ -z $gh_username || -z $gh_token ]]; then
 fi
 
 set -e
-b64_enc_regcred=$(echo -n "$gh_username:$gh_token" | base64)
+b64_enc_regcred=$(echo -n "$gh_username:$gh_token" | base64 -w0)
 
-echo "{\"auths\":{\"ghcr.io\":{\"auth\":\"$b64_enc_regcred\"}}}"
+echo -n "{\"auths\":{\"ghcr.io\":{\"auth\":\"$b64_enc_regcred\"}}}"
