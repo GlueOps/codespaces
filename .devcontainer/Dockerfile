@@ -68,7 +68,7 @@ RUN curl -sSL https://sdk.cloud.google.com | bash \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
     && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
     && apt update \
-    && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot nethogs nload -y \
     && apt clean -y
 ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 
