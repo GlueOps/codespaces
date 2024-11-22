@@ -4,6 +4,18 @@
 
 This repo contains all the environmental tools/dependencies to deploy the entire glueops platform. Tools include but are not limited to: terraform, helm, kubectl, devbox/nix, etc. We primarily use this repository in all of our codespaces as well as github actions. Ref: https://github.com/GlueOps/glueops/blob/%F0%9F%9A%80%F0%9F%92%8E%F0%9F%99%8C%F0%9F%9A%80/.devcontainer/devcontainer.json#L5
 
+## DevBox
+
+Since we have devbox installed any packages/tools that aren't installed (e.g. python) can easily be fetched from https://www.nixhub.io/
+
+Here is a quick getting started with devbox: https://jetify.com/docs/devbox/quickstart/#create-a-development-environment
+
+```bash
+devbox init
+devbox add python@3.10
+devbox shell
+python --version
+```
 
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
