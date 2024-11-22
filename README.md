@@ -2,12 +2,24 @@
 
 ## Description: 
 
-This repo contains all the environmental tools/dependencies to deploy the entire glueops platform. Tools include but are not limited to: terraform, helm, kubectl, etc. We primarily use this repository in all of our codespaces as well as github actions. Ref: https://github.com/GlueOps/glueops/blob/%F0%9F%9A%80%F0%9F%92%8E%F0%9F%99%8C%F0%9F%9A%80/.devcontainer/devcontainer.json#L5
+This repo contains all the environmental tools/dependencies to deploy the entire glueops platform. Tools include but are not limited to: terraform, helm, kubectl, devbox/nix, etc. We primarily use this repository in all of our codespaces as well as github actions. Ref: https://github.com/GlueOps/glueops/blob/%F0%9F%9A%80%F0%9F%92%8E%F0%9F%99%8C%F0%9F%9A%80/.devcontainer/devcontainer.json#L5
 
+## DevBox
+
+Since we have devbox installed any packages/tools that aren't installed (e.g. python) can easily be fetched from https://www.nixhub.io/
+
+Here is a quick getting started with devbox: https://jetify.com/docs/devbox/quickstart/#create-a-development-environment
+
+```bash
+devbox init
+devbox add python@3.10
+devbox shell
+python --version
+```
 
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
-- Once you publish a release a new image will be built and uploaded to GHCR: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
+- Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
 
 
 
@@ -23,7 +35,7 @@ It's best to just reference the github workflows under `.github/workflows` the p
 export AWS_ACCESS_KEY_ID="XXXXXXXXXXXXXXXXX"
 export AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXX"
 packer init aws.pkr.hcl
-packer build -var glueops_codespaces_container_tag=v0.52.0 aws.pkr.hcl
+packer build -var glueops_codespaces_container_tag=v0.71.0 aws.pkr.hcl
 ```
 
 ### Running Hetzner
@@ -31,8 +43,19 @@ packer build -var glueops_codespaces_container_tag=v0.52.0 aws.pkr.hcl
 ```bash
 export HCLOUD_TOKEN="XXXXXXXXXXXXXXXXX"
 packer init hetzner.pkr.hcl
-packer build -var glueops_codespaces_container_tag=v0.52.0 hetzner.pkr.hcl
+packer build -var glueops_codespaces_container_tag=v0.71.0 hetzner.pkr.hcl
 ```
 
 
-_Note: v0.52.0 is the latest version at the time of creating this README.md you can check for the latest version here: https://github.com/GlueOps/codespaces/releases
+_Note:_ v0.71.0 is the latest version at the time of creating this README.md you can check for the latest version here: https://github.com/GlueOps/codespaces/releases
+
+
+### Break Glass Setup
+
+If you are having issues spinning up a VM using our automation, just create one with a provider of your choice and run these commands:
+
+```bash
+curl -sL setup.glueops.dev | bash
+sudo tailscale up --ssh --accept-routes
+```
+
