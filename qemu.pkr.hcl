@@ -18,10 +18,9 @@ source "qemu" "qemu-amd64" {
   vnc_port_min      = 5901
   vnc_port_max      = 5901
   cores             = 8
-  threads           = 16
   qemuargs          = [
-    ["-m", "4096M"],
-    ["-smp", "2"],
+    ["-m", "30000M"],
+    ["-smp", "8"],
     ["-cdrom", "ci-data.iso"]
   ]
 }
