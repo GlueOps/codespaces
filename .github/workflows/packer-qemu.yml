@@ -58,7 +58,7 @@ jobs:
         run: |
            mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 ..
            tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
-           split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ github.event.workflow_run.head_branch }}.qcow2.tar.part_
+           split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
 
       - name: Upload *.qcow.tar.part_* files to GitHub Releases as an Asset
         uses: xresloader/upload-to-github-release@v1
