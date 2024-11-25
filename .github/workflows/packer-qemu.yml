@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       glueops_codespace_tag:
-        description: 'Enter the Codespace tag name e.g. v0.60.0'
+        description: 'Enter the github.com/glueops/codespaces tag to use (e.g. v0.60.0)'
         required: false
 
 jobs:

@@ -5,6 +5,11 @@ on:
     workflows: ["Build and Publish devcontainer image"]
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      glueops_codespace_tag:
+        description: 'Enter the github.com/glueops/codespaces tag to use (e.g. v0.60.0)'
+        required: false
 
 jobs:
   build:
@@ -25,12 +30,12 @@ jobs:
 
       - name: Run `packer build stage`
         id: build_stage
-        run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} hetzner.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} hetzner.pkr.hcl
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN_STAGE }}
 
       - name: Run `packer build prod`
         id: build_prod
-        run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} hetzner.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} hetzner.pkr.hcl
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN_PROD }}
