@@ -5,6 +5,11 @@ on:
     workflows: ["Build and Publish devcontainer image"]
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      glueops_codespace_tag:
+        description: 'Enter the Codespace tag name e.g. v0.60.0'
+        required: false
 
 jobs:
   build:
@@ -40,7 +45,7 @@ jobs:
 
       - name: Run packer build
         id: build
-        run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} qemu.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} qemu.pkr.hcl
 
       - id: install-aws-cli
         uses: unfor19/install-aws-cli-action@v1
@@ -49,12 +54,18 @@ jobs:
           verbose: false
           arch: amd64 
 
-      - name: copy file to s3 storage
+      - name: Split qcow2 image into 1024M files
         run: |
-          aws s3 cp images/${{ github.event.workflow_run.head_branch }}.qcow2 s3://${{ secrets.S3_BUCKET }}/${{ github.event.workflow_run.head_branch }}.qcow2
+           mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 ..
+           tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
+           split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
+
+      - name: Upload *.qcow.tar.part_* files to GitHub Releases as an Asset
+        uses: xresloader/upload-to-github-release@v1
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.S3_BUCKET_REGION }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.qcow2.tar.part_*"
+          tags: true
           
           
