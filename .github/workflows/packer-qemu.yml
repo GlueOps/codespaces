@@ -5,6 +5,11 @@ on:
     workflows: ["Build and Publish devcontainer image"]
     types:
       - completed
+  workflow_dispatch:
+    inputs:
+      glueops_codespace_tag:
+        description: 'Enter the Codespace tag name e.g. v0.60.0'
+        required: false
 
 jobs:
   build:
@@ -40,7 +45,7 @@ jobs:
 
       - name: Run packer build
         id: build
-        run: packer build -var glueops_codespaces_container_tag=${{ github.event.workflow_run.head_branch }} qemu.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} qemu.pkr.hcl
 
       - id: install-aws-cli
         uses: unfor19/install-aws-cli-action@v1
@@ -49,13 +54,13 @@ jobs:
           verbose: false
           arch: amd64 
 
-      - name: Split qcow2 image into 1024M files and then upload to GitHub Releases as an Asset
+      - name: Split qcow2 image into 1024M files
         run: |
-           mv images/${{ github.event.workflow_run.head_branch }}.qcow2 ..
-           tar -cvf ${{ github.event.workflow_run.head_branch }}.qcow2
-           split -b 1024M ${{ github.event.workflow_run.head_branch }}.qcow2.tar ${{ github.event.workflow_run.head_branch }}.qcow2.tar.part_
+           mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 ..
+           tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
+           split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ github.event.workflow_run.head_branch }}.qcow2.tar.part_
 
-      - name: upload
+      - name: Upload *.qcow.tar.part_* files to GitHub Releases as an Asset
         uses: xresloader/upload-to-github-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
