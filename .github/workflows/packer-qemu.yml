@@ -57,7 +57,7 @@ jobs:
       - name: Split qcow2 image into 1024M files
         run: |
            mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 .
-           tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
+           tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
            split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
 
       - name: Upload *.qcow2.tar.part_* files to GitHub Releases as an Asset
