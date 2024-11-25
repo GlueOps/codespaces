@@ -17,10 +17,9 @@ source "qemu" "qemu-amd64" {
   ssh_wait_timeout  = "5m"
   vnc_port_min      = 5901
   vnc_port_max      = 5901
-  cores             = 8
   qemuargs          = [
-    ["-m", "30000M"],
-    ["-smp", "8"],
+    ["-m", "4096M"],
+    ["-smp", "2"],
     ["-cdrom", "ci-data.iso"]
   ]
 }
