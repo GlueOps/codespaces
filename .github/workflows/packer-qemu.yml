@@ -66,6 +66,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           file: "*.qcow2.tar.part_*"
-          tags: true
+          tag_name: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
           
           
