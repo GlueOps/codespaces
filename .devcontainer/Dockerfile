@@ -13,7 +13,6 @@ ARG VERSION_KUBECTL=1.29.11
 ARG VERSION_OPENTOFU=1.7.6
 ARG VERSION_HELM=3.15.4
 ARG VERSION_GCLOUD_SDK=503.0.0
-ARG VERSION_TASKFILE=3.40.0
 ARG VERSION_KIND=0.25.0
 ARG VERSION_K9S=0.32.7
 ARG VERSION_TERRAFORM_DOCS=0.19.0
@@ -75,7 +74,6 @@ ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
 RUN apt update \
     && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
     && apt clean -y
-RUN sh -c "$(curl --location https://raw.githubusercontent.com/go-task/task/v${VERSION_TASKFILE}/install-task.sh)" -- -d -b /usr/local/bin/
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v${VERSION_KIND}/kind-linux-amd64 \
     && chmod +x /usr/local/bin/kind
 RUN wget https://github.com/derailed/k9s/releases/download/v${VERSION_K9S}/k9s_Linux_amd64.tar.gz \
