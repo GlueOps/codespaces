@@ -3,7 +3,7 @@
 # [Choice] Ubuntu version (use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon): ubuntu-22.04, ubuntu-20.04, ubuntu-18.04
 #https://mcr.microsoft.com/v2/devcontainers/base/tags/list
 #https://github.com/devcontainers/images/tree/main/src/base-ubuntu
-FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:003d94e845d73ea81a9245edd90a4edf852ff19e5b9a7992692538ba6295a9be
+FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:8e6762ffc190e651180923b40a157c8dc21e2b1eb4438369860eee749b30f3cb
 
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
@@ -11,13 +11,14 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:003d94e84
 
 ARG VERSION_KUBECTL=1.30.8
 ARG VERSION_OPENTOFU=1.8.8
+
 ARG VERSION_HELM=3.15.4
-ARG VERSION_GCLOUD_SDK=503.0.0
-ARG VERSION_KIND=0.25.0
+ARG VERSION_GCLOUD_SDK=505.0.0
+ARG VERSION_KIND=0.26.0
 ARG VERSION_K9S=0.32.7
 ARG VERSION_TERRAFORM_DOCS=0.19.0
 ARG VERSION_KUBENT=0.7.3
-ARG VERSION_HELM_DIFF=3.9.12
+ARG VERSION_HELM_DIFF=3.9.14
 ARG VERSION_CHARM_GUM=0.14.5
 ARG VERSION_ARGO_CD_CLI=2.11.12
 ARG VERSION_K3D=5.7.5

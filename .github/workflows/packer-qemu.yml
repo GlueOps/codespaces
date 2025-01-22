@@ -67,5 +67,10 @@ jobs:
         with:
           file: "*.qcow2.tar.part_*"
           tag_name: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
+
+      - name: Trigger image cache
+        run: |
+          curl 'https://api-provisioner.glueopshosted.rocks/update-image-cache' || true
+          curl 'https://api-provisioner.glueopshosted.com/update-image-cache' || true
           
           
