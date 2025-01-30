@@ -21,6 +21,8 @@ python --version
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
 
+**Note:** Due to the connection between the packer workflows and the Docker build/publish workflow, it's not possible to cut a release from any branch other than `main`. Some limitations in GitHub prevent the actions checkout step in the packer workflows from accurately determining the parent commit SHA, which defaults to `main`. Therefore, if you're testing changes outside of the Dockerfile, this method may not provide accurate results. One potential solution is to combine all the workflows, but this would result in a runtime of an hour or more.
+
 
 
 # Running packer locally:
