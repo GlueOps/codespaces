@@ -17,8 +17,6 @@ jobs:
     runs-on: codespaces
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-        with:
-          ref: ${{ inputs.glueops_codespace_tag && format('refs/tags/{0}', inputs.glueops_codespace_tag) || github.event.workflow_run.head_branch }}
 
       - name: Setup packer
         uses: hashicorp/setup-packer@1aa358be5cf73883762b302a3a03abd66e75b232 # v3.1.0
