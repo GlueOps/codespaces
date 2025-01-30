@@ -27,8 +27,10 @@ sudo groupadd -f docker
 sudo usermod -aG docker vscode
 echo 'fs.inotify.max_user_instances=1024' | sudo tee -a /etc/sysctl.conf
 echo 1024 | sudo tee /proc/sys/fs/inotify/max_user_instances
+echo "Save .glueopsrc"
 #sudo curl https://raw.githubusercontent.com/GlueOps/development-only-utilities/v0.21.0/tools/developer-setup/.glueopsrc --output /home/vscode/.glueopsrc
 sudo curl https://raw.githubusercontent.com/GlueOps/development-only-utilities/refs/heads/major-switch-to-a-directory-under-/-instead-of-/home/vscode/tools/developer-setup/.glueopsrc --output /home/vscode/.glueopsrc
+
 echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
 sudo mkdir -p /workspaces
