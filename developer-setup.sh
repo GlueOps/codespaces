@@ -27,9 +27,58 @@ sudo groupadd -f docker
 sudo usermod -aG docker vscode
 echo 'fs.inotify.max_user_instances=1024' | sudo tee -a /etc/sysctl.conf
 echo 1024 | sudo tee /proc/sys/fs/inotify/max_user_instances
-echo "Save .glueopsrc"
-#sudo curl https://raw.githubusercontent.com/GlueOps/development-only-utilities/v0.21.0/tools/developer-setup/.glueopsrc --output /home/vscode/.glueopsrc
-sudo curl https://raw.githubusercontent.com/GlueOps/development-only-utilities/refs/heads/major-switch-to-a-directory-under-/-instead-of-/home/vscode/tools/developer-setup/.glueopsrc --output /home/vscode/.glueopsrc
+echo "Create .glueopsrc"
+
+GLUEOPSRC='dev() {
+    if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
+        if tmux attach-session -t dev 2>/dev/null; then
+            # Successfully attached to existing session, do nothing more
+            :
+        else
+            # Creating a new tmux session and running a command
+            tmux new-session -s dev -d
+            tmux send-keys -t dev "dev" C-m
+            tmux attach-session -t dev
+        fi
+    fi
+    echo "Fetching the last 10 tags..."
+    IFS=$"\n" tags=($(curl -s https://api.github.com/repos/GlueOps/codespaces/tags | jq -r ".[].name" | head -10))
+
+    # Check for cached images
+    cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.io/glueops/codespaces")
+
+    # Add a custom option and check if each tag is cached
+    tags+=("Custom")
+    for i in "${!tags[@]}"; do
+        if echo "$cached_images" | grep -q "${tags[$i]}"; then
+            tags[$i]="${tags[$i]} (cached)"
+        fi
+    done
+
+    PS3="Please select a tag or Custom to enter one): "
+    select tag in "${tags[@]}"; do
+        # Remove the (cached) part from the tag if present
+        selected_tag="${tag/(cached)/}"
+        selected_tag="${selected_tag// /}"
+
+        if [[ -z "$selected_tag" ]]; then
+            echo "Invalid selection. Please try again."
+        elif [ "$selected_tag" == "Custom" ]; then
+            read -p "Enter custom tag: " customTag
+            export CONTAINER_TAG_TO_USE=$customTag
+            echo "CONTAINER_TAG_TO_USE set to $customTag"
+            break
+        else
+            export CONTAINER_TAG_TO_USE=$selected_tag
+            echo "CONTAINER_TAG_TO_USE set to $selected_tag"
+            break
+        fi
+    done
+
+    mkdir -p /workspaces/glueops; sudo docker run -it --net=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --privileged --init --device=/dev/net/tun -u $(id -u):$(getent group docker | cut -d: -f3) -v /workspaces/glueops:/workspaces/glueops -v /var/run/docker.sock:/var/run/docker.sock -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock -w /workspaces/glueops ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
+}'
+
+echo $GLUEOPSRC > /home/vscode/.glueopsrc
 
 echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
