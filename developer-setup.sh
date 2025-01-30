@@ -29,7 +29,8 @@ echo 'fs.inotify.max_user_instances=1024' | sudo tee -a /etc/sysctl.conf
 echo 1024 | sudo tee /proc/sys/fs/inotify/max_user_instances
 echo "Create .glueopsrc"
 
-GLUEOPSRC='dev() {
+
+dev() {
     if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
         if tmux attach-session -t dev 2>/dev/null; then
             # Successfully attached to existing session, do nothing more
@@ -42,7 +43,7 @@ GLUEOPSRC='dev() {
         fi
     fi
     echo "Fetching the last 10 tags..."
-    IFS=$"\n" tags=($(curl -s https://api.github.com/repos/GlueOps/codespaces/tags | jq -r ".[].name" | head -10))
+    IFS=$'\n' tags=($(curl -s https://api.github.com/repos/GlueOps/codespaces/tags | jq -r '.[].name' | head -10))
 
     # Check for cached images
     cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.io/glueops/codespaces")
@@ -55,7 +56,7 @@ GLUEOPSRC='dev() {
         fi
     done
 
-    PS3="Please select a tag or Custom to enter one): "
+    PS3="Please select a tag (or 'Custom' to enter one): "
     select tag in "${tags[@]}"; do
         # Remove the (cached) part from the tag if present
         selected_tag="${tag/(cached)/}"
@@ -76,9 +77,11 @@ GLUEOPSRC='dev() {
     done
 
     mkdir -p /workspaces/glueops; sudo docker run -it --net=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --privileged --init --device=/dev/net/tun -u $(id -u):$(getent group docker | cut -d: -f3) -v /workspaces/glueops:/workspaces/glueops -v /var/run/docker.sock:/var/run/docker.sock -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock -w /workspaces/glueops ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
-}'
+}
 
-echo $GLUEOPSRC > /home/vscode/.glueopsrc
+GLUEOPSRC="$(declare -f dev)"
+
+echo "$GLUEOPSRC" > /home/vscode/.glueopsrc
 
 echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
