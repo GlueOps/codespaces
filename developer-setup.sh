@@ -81,7 +81,7 @@ dev() {
 
 GLUEOPSRC="$(declare -f dev)"
 
-echo "$GLUEOPSRC" > /home/vscode/.glueopsrc
+echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
 
 echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
