@@ -143,6 +143,8 @@ RUN code --install-extension MS-vsliveshare.vsliveshare --extensions-dir /home/v
 RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
 
 RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
+# 0.14.0 came out a couple weeks ago and it appears to be problematic. So pinning and manually upgrading seems like a good option
+ENV DEVBOX_USE_VERSION=0.13.0
 RUN curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
 
 
