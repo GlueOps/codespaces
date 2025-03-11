@@ -10,7 +10,7 @@ Since we have devbox installed any packages/tools that aren't installed (e.g. py
 
 Here is a quick getting started with devbox: https://jetify.com/docs/devbox/quickstart/#create-a-development-environment
 
-```bash
+```bashsss
 devbox init
 devbox add python@3.10
 devbox shell
