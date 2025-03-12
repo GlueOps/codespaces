@@ -48,13 +48,6 @@ jobs:
         id: build
         run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} qemu.pkr.hcl
 
-      - id: install-aws-cli
-        uses: unfor19/install-aws-cli-action@v1
-        with:
-          version: 2
-          verbose: false
-          arch: amd64 
-
       - name: Split qcow2 image into 1024M files
         run: |
            mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 .
