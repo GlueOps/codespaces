@@ -24,6 +24,11 @@
 		"git-lfs": "latest",
 		"github-cli": "latest",
 		"aws-cli": "latest",
-		"sshd": "latest"
+		"sshd": "latest",
+		"node": "22.14.0",
+		"python": {
+			"version" : "3.11.11",
+			"installTools" : true
+		}
 	}
 }
