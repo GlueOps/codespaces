@@ -48,6 +48,23 @@ jobs:
         id: build
         run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} qemu.pkr.hcl
 
+
+      - id: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+        with:
+          version: 2
+          verbose: false
+          arch: amd64 
+
+      - name: Upload .qcow2 to S3
+        run: |
+          aws s3 cp images/${{ github.event.workflow_run.head_branch }}.qcow2 s3://${{ secrets.S3_BUCKET }}/${{ github.event.workflow_run.head_branch }}.qcow2 --acl public-read
+        env: 
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_BUCKET_REGION }}
+
+
       - name: Split qcow2 image into 1024M files
         run: |
            mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 .
@@ -61,6 +78,9 @@ jobs:
         with:
           file: "*.qcow2.tar.part_*"
           tag_name: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
+
+
+
 
       - name: Trigger image cache
         run: |
