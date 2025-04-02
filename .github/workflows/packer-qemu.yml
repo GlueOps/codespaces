@@ -24,6 +24,9 @@ jobs:
         with:
           version: 1.11.2
 
+      - name: Generate image password
+        run: echo "IMAGE_PASSWORD=$(openssl rand -base64 16)" >> $GITHUB_ENV
+
       - name: Generate cloud-init iso
         run: |
           sudo apt install genisoimage
@@ -31,7 +34,7 @@ jobs:
           chpasswd:
             expire: False
             users:
-            - {name: debian, password: password, type: text}
+            - {name: debian, password: '"$IMAGE_PASSWORD"', type: text}
           ssh_pwauth: True' > user-data
           echo 'instance-id: iid-local01
           local-hostname: localhost' > meta-data
@@ -46,7 +49,7 @@ jobs:
 
       - name: Run packer build
         id: build
-        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} qemu.pkr.hcl
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} -var image_password=${{ env.IMAGE_PASSWORD }} qemu.pkr.hcl
 
 
       - id: install-aws-cli
