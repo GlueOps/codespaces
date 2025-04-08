@@ -43,7 +43,12 @@ dev() {
         fi
     fi
     echo "Fetching the last 10 tags..."
-    IFS=$'\n' tags=($(curl -s https://api.github.com/repos/GlueOps/codespaces/tags | jq -r '.[].name' | head -10))
+    if [ "${ENVIRONMENT:-prod}" = "nonprod" ]; then
+        echo "WARNING: RUNNING IN NONPROD ENVIRONMENT"
+        IFS=$'\n' tags=($(curl -s https://api-provisioner.glueopshosted.rocks/v1/get-images | jq -r '.images[]' | head -5))
+    else
+        IFS=$'\n' tags=($(curl -s https://api-provisioner.glueopshosted.com/v1/get-images | jq -r '.images[]' | head -5))
+    fi
 
     # Check for cached images
     cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.io/glueops/codespaces")
