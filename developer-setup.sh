@@ -42,7 +42,7 @@ dev() {
             tmux attach-session -t dev
         fi
     fi
-    echo "Fetching the last 10 tags..."
+    echo "Fetching the last 5 tags..."
     if [ "${ENVIRONMENT:-prod}" = "nonprod" ]; then
         echo "WARNING: RUNNING IN NONPROD ENVIRONMENT"
         IFS=$'\n' tags=($(curl -s https://api-provisioner.glueopshosted.rocks/v1/get-images | jq -r '.images[]' | head -5))
