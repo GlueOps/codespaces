@@ -2,6 +2,10 @@ variable "glueops_codespaces_container_tag" {
   type    = string
 }
 
+variable "image_password" {
+  type    = string
+}
+
 source "qemu" "qemu-amd64" {
   iso_url           = "https://cloud.debian.org/images/cloud/bookworm/20241004-1890/debian-12-generic-amd64-20241004-1890.qcow2"
   iso_checksum      = "file:https://cloud.debian.org/images/cloud/bookworm/20241004-1890/SHA512SUMS"
@@ -11,7 +15,7 @@ source "qemu" "qemu-amd64" {
   format            = "qcow2"
   vm_name           = "${var.glueops_codespaces_container_tag}.qcow2"
   ssh_username      = "debian"
-  ssh_password      = "password"
+  ssh_password      = "${var.image_password}"
   shutdown_command  = "echo 'packer' | sudo -S shutdown -P now"
   headless          = true
   ssh_wait_timeout  = "5m"
