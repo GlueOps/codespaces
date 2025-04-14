@@ -85,8 +85,22 @@ dev() {
 }
 
 GLUEOPSRC="$(declare -f dev)"
-
 echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
+
+
+dev() {
+    if [ "$(whoami)" != "vscode" ]; then
+        echo -e "\033[1;31m⚠️  You are not the 'vscode' user. Switching to 'vscode' and running 'dev' \033[0m"
+        exec su - vscode -c "bash -i -c dev"
+    else
+        echo "You are already the 'vscode' user."
+    fi
+}
+
+ROOTBASHRC="$(declare -f dev)"
+echo "$ROOTBASHRC" | sudo tee -a /root/.bashrc
+
+
 
 echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
