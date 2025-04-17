@@ -128,9 +128,14 @@ dev() {
             -w /workspaces/glueops \
             ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash
     fi
+
+    LOG_OPTIONS="--log off"
+    if [ "$CODESPACE_ENABLE_VERBOSE_LOGS" = "true" ]; then
+      LOG_OPTIONS="--verbose --log trace"
+    fi
     
     # Exec into the container and run the code tunnel (shell stays open)
-    sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
+    sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
 }
 
 GLUEOPSRC="$(declare -f dev)"
