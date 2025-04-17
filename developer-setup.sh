@@ -151,9 +151,9 @@ dev() {
                 "Consider deleting this environment and creating a" \
                 "new one via Slack to get the latest updates." \
                 "" \
-                "⚠️ $(gum style --bold --foreground=196 'IMPORTANT:') Before deleting, ensure you" \
-                "   $(gum style --bold --foreground=196 'commit and push ALL your work.') Anything" \
-                "   stored only in this codespace $(gum style --bold --foreground=196 'will be lost.')"
+                "$(gum style --bold --foreground=196 '⚠️ IMPORTANT:') Before deleting, ensure you" \
+                "   $(gum style --bold --foreground=226 'commit')$(gum style --bold --foreground=196 ' and ')$(gum style --bold --foreground=226 'push')$(gum style --bold --foreground=196 ' ALL your work. Anything stored')" \
+                "   only in this codespace $(gum style --bold --foreground=196 'will be lost.')"
 
             sleep 5
         elif [[ -n "$latest_tag_name" && "$existing_tag" == "$latest_tag_name" ]]; then
