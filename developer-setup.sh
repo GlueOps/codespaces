@@ -145,13 +145,17 @@ dev() {
             gum style --border double --border-foreground=214 --padding "1 2" --margin "1 0" \
                 "🟠 UPDATE AVAILABLE! 🟠" \
                 "" \
-                "Your version:    $(gum style --bold "$existing_tag")" \
-                "Latest version:  $(gum style --bold "$latest_tag_name")" \
+                "Your version:     $(gum style --bold "$existing_tag")" \
+                "Latest version:   $(gum style --bold "$latest_tag_name")" \
                 "" \
                 "Consider deleting this environment and creating a" \
-                "new one via Slack to get the latest updates."
+                "new one via Slack to get the latest updates." \
+                "" \
+                "⚠️ $(gum style --bold --foreground=196 'IMPORTANT:') Before deleting, ensure you" \
+                "   $(gum style --bold --foreground=196 'commit and push ALL your work.') Anything" \
+                "   stored only in this codespace $(gum style --bold --foreground=196 'will be lost.')"
 
-            sleep 3
+            sleep 5
         elif [[ -n "$latest_tag_name" && "$existing_tag" == "$latest_tag_name" ]]; then
              gum style --padding "0 1" --foreground=40 "👍 You are running the latest version ($existing_tag)."
         fi
