@@ -104,8 +104,7 @@ dev() {
         if [ "$STATUS" = "running" ]; then
             echo -e "${RED}❗ Container '$CONTAINER_NAME' is already running. Using the existing image tag: '$IMAGE_NAME_TAG' (ignoring any provided tag).${NC}"
         else
-            echo -e "${ORANGE}🟠 Container '$CONTAINER_NAME' is stopped.${NC}"
-            echo -e "${YELLOW}Starting container '$CONTAINER_NAME' now...${NC}"
+            echo -e "${RED}❗ Container '$CONTAINER_NAME' already exists and is currently stopped. Starting the existing container with image tag: '$IMAGE_NAME_TAG' (ignoring any provided tag).${NC}"
             sudo docker start "$CONTAINER_NAME"
         fi
     else
