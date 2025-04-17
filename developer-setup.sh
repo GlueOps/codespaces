@@ -111,6 +111,7 @@ dev() {
     else
         echo -e "${YELLOW}❌ Container '$CONTAINER_NAME' does not exist.${NC}"
         echo -e "${YELLOW}🧼 Creating a new container...${NC}"
+        sleep 3;
     
         # Start a new container
         sudo docker run -itd --name "$CONTAINER_NAME" \
@@ -128,22 +129,13 @@ dev() {
             ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash
     fi
     
-    # Clean slate instructions
-    echo -e "${YELLOW}🧼 If you'd like to do a clean slate, follow these steps:${NC}"
-    echo -e "${YELLOW}1. Stop all running containers:${NC}"
-    echo -e "${YELLOW}   sudo docker stop \$(sudo docker ps -q)${NC}"
-    echo -e "${YELLOW}2. Remove unused images, containers, and more:${NC}"
-    echo -e "${YELLOW}   sudo docker system prune -a${NC}"
-    echo -e "${YELLOW}3. Press Ctrl + C to kill the current session.${NC}"
-    echo -e "${YELLOW}4. Run 'dev' again to restart the process.${NC}"
-    echo -e ""
-    
     # Exec into the container and run the code tunnel (shell stays open)
     sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
 }
 
 GLUEOPSRC="$(declare -f dev)"
 echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
+
 
 
 dev() {
