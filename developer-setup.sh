@@ -81,7 +81,65 @@ dev() {
         fi
     done
 
-    mkdir -p /workspaces/glueops; sudo docker run -it --net=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --privileged --init --device=/dev/net/tun -u $(id -u):$(getent group docker | cut -d: -f3) -v /workspaces/glueops:/workspaces/glueops -v /var/run/docker.sock:/var/run/docker.sock -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock -w /workspaces/glueops ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
+    mkdir -p /workspaces/glueops
+
+    CONTAINER_NAME="codespace"
+    YELLOW="\033[1;33m"  # Bright Yellow
+    ORANGE="\033[0;33m"  # Dim Yellow (Orange-ish)
+    RED="\033[1;31m"     # Red
+    NC="\033[0m"         # No Color / Reset
+    
+    # Check if the container exists
+    if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        # If the container exists, check if it's running
+        STATUS=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME")
+    
+        # Get the image name and tag from the container
+        IMAGE_NAME_TAG=$(sudo docker inspect -f '{{.Config.Image}}' "$CONTAINER_NAME")
+        CONTAINER_TAG_TO_USE="$IMAGE_NAME_TAG"
+    
+        # Output the image tag
+        echo -e "${YELLOW}📦 Using image tag: ${CONTAINER_TAG_TO_USE}${NC}"
+    
+        if [ "$STATUS" = "running" ]; then
+            echo -e "${RED}❗ Container '$CONTAINER_NAME' is already running. Using the existing image tag: '$IMAGE_NAME_TAG' (ignoring any provided tag).${NC}"
+        else
+            echo -e "${ORANGE}🟠 Container '$CONTAINER_NAME' is stopped.${NC}"
+            echo -e "${YELLOW}Starting container '$CONTAINER_NAME' now...${NC}"
+            sudo docker start "$CONTAINER_NAME"
+        fi
+    else
+        echo -e "${YELLOW}❌ Container '$CONTAINER_NAME' does not exist.${NC}"
+        echo -e "${YELLOW}🧼 Creating a new container...${NC}"
+    
+        # Start a new container
+        sudo docker run -itd --name "$CONTAINER_NAME" \
+            --net=host \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            --privileged \
+            --init \
+            --device=/dev/net/tun \
+            -u "$(id -u):$(getent group docker | cut -d: -f3)" \
+            -v /workspaces/glueops:/workspaces/glueops \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
+            -w /workspaces/glueops \
+            ghcr.io/glueops/codespaces:${CONTAINER_TAG_TO_USE} bash
+    fi
+    
+    # Clean slate instructions
+    echo -e "${YELLOW}🧼 If you'd like to do a clean slate, follow these steps:${NC}"
+    echo -e "${YELLOW}1. Stop all running containers:${NC}"
+    echo -e "${YELLOW}   sudo docker stop \$(sudo docker ps -q)${NC}"
+    echo -e "${YELLOW}2. Remove unused images, containers, and more:${NC}"
+    echo -e "${YELLOW}   sudo docker system prune -a${NC}"
+    echo -e "${YELLOW}3. Press Ctrl + C to kill the current session.${NC}"
+    echo -e "${YELLOW}4. Run 'dev' again to restart the process.${NC}"
+    echo -e ""
+    
+    # Exec into the container and run the code tunnel (shell stays open)
+    sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name ${CODESPACE_ENABLE_VERBOSE_LOGS:+--verbose --log trace}"
 }
 
 GLUEOPSRC="$(declare -f dev)"
