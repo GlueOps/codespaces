@@ -285,7 +285,7 @@ dev() {
 
     gum style --border normal --border-foreground=240 --padding "0 2" --margin "1 0" \
         "🚀 Executing 'code tunnel' inside the container..."
-
+    tmux switch-client -r
     sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
 
     local exec_status=$?
