@@ -327,7 +327,7 @@ server_ip=$(echo $SSH_CONNECTION | awk '{print $3}')
 echo ""
 echo ""
 #sudo figlet GlueOps | sudo tee /etc/motd
-{ echo -e "\e[1;32m$(figlet GlueOps)\e[0m"; echo ""; echo -e "\e[1;34mPlease log in as user 'vscode' or switch to that user by running:\e[0m"; echo ""; echo -e "\e[1;33m    sudo su - vscode\e[0m"; echo ""; echo -e "\e[1;34mAfter switching to the 'vscode' user, run the following command:\e[0m"; echo ""; echo -e "\e[1;33m    dev\e[0m"; } | sudo tee /etc/motd
+{ echo -e "\e[1;32m$(figlet GlueOps)\e[0m"; echo ""; echo -e "\e[1;34mTo get your codespace started, run the following command:\e[0m"; echo ""; echo -e "\e[1;33m    dev\e[0m"; } | sudo tee /etc/motd
 
 #Install tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
