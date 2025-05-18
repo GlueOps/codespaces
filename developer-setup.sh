@@ -178,73 +178,78 @@ dev() {
     else
         # --- Container Does Not Exist ---
         # We already fetched tags, need latest_tag_name and all_tags
-        if [[ -z "$latest_tag_name" ]]; then
-             gum style --padding "0 1" --foreground=196 --bold \
-                "❌ ERROR:" "Cannot proceed without available image tags from API." >&2
-             return 1
-        fi
-
-        gum style --border normal --border-foreground=226 --padding "0 2" --margin "1 0" \
-            "🔎 Container '$CONTAINER_NAME' does not exist. Proceeding with setup."
-
-        # Take the top 5 tags for display list
-        mapfile -t tags_to_display < <(printf "%s\n" "${all_tags[@]}" | head -5)
-
-        # --- Check Cached Images ---
-        local cached_images
-        cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.io/glueops/codespaces")
-
-        # --- Prepare Options for Gum (Using Simplified Markers) ---
-        local options=()
-
-        for tag in "${tags_to_display[@]}"; do
-            local display_tag="$tag" # Base display tag is just the tag name
-            local is_latest=false
-            local is_cached=false
-
-            if [[ "$tag" == "$latest_tag_name" ]]; then
-                is_latest=true
-            fi
-            if echo "$cached_images" | grep -q ":${tag}$"; then
-                is_cached=true
+        # allow images to be selected in the nonprod environment
+        if [ "${ENVIRONMENT:-prod}" = "nonprod" ]; then
+            if [[ -z "$latest_tag_name" ]]; then
+                gum style --padding "0 1" --foreground=196 --bold \
+                    "❌ ERROR:" "Cannot proceed without available image tags from API." >&2
+                return 1
             fi
 
-            local marker=""
-            if $is_latest && $is_cached; then marker=" [L, C]";
-            elif $is_latest; then marker=" [L]";
-            elif $is_cached; then marker=" [C]"; fi
-            display_tag="$tag$marker"
+            gum style --border normal --border-foreground=226 --padding "0 2" --margin "1 0" \
+                "🔎 Container '$CONTAINER_NAME' does not exist. Proceeding with setup."
 
-            options+=("$display_tag")
-        done
-        options+=("Custom")
+            # Take the top 5 tags for display list
+            mapfile -t tags_to_display < <(printf "%s\n" "${all_tags[@]}" | head -5)
 
-        # --- Use Gum Choose for Selection ---
-        local selected_option
-        selected_option=$(gum choose \
-            --header "Please select a tag ([L]=Latest, [C]=Cached):" \
-            --height 10 \
-            "${options[@]}"
-        )
-        if [ $? -ne 0 ]; then gum style --padding "0 1" --foreground=214 "🟡 Selection cancelled."; return 1; fi
-        if [ -z "$selected_option" ]; then gum style --padding "0 1" --foreground=196 --bold "❌ ERROR:" "No option selected." >&2; return 1; fi
+            # --- Check Cached Images ---
+            local cached_images
+            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.io/glueops/codespaces")
 
-        # --- Handle Selection (Using sed for Cleaning) ---
-        local selected_tag
+            # --- Prepare Options for Gum (Using Simplified Markers) ---
+            local options=()
 
-        if [ "$selected_option" == "Custom" ]; then
-            selected_tag=$(gum input --placeholder "Enter custom tag:" --prompt "$(gum style --bold 'Custom Tag >') ")
-            if [ $? -ne 0 ] || [ -z "$selected_tag" ]; then gum style --padding "0 1" --foreground=214 "🟡 Custom tag entry cancelled or empty."; return 1; fi
-            gum style --padding "0 1" "🏷️ Using custom tag: $(gum style --bold "$selected_tag")"
+            for tag in "${tags_to_display[@]}"; do
+                local display_tag="$tag" # Base display tag is just the tag name
+                local is_latest=false
+                local is_cached=false
+
+                if [[ "$tag" == "$latest_tag_name" ]]; then
+                    is_latest=true
+                fi
+                if echo "$cached_images" | grep -q ":${tag}$"; then
+                    is_cached=true
+                fi
+
+                local marker=""
+                if $is_latest && $is_cached; then marker=" [L, C]";
+                elif $is_latest; then marker=" [L]";
+                elif $is_cached; then marker=" [C]"; fi
+                display_tag="$tag$marker"
+
+                options+=("$display_tag")
+            done
+            options+=("Custom")
+
+            # --- Use Gum Choose for Selection ---
+            local selected_option
+            selected_option=$(gum choose \
+                --header "Please select a tag ([L]=Latest, [C]=Cached):" \
+                --height 10 \
+                "${options[@]}"
+            )
+            if [ $? -ne 0 ]; then gum style --padding "0 1" --foreground=214 "🟡 Selection cancelled."; return 1; fi
+            if [ -z "$selected_option" ]; then gum style --padding "0 1" --foreground=196 --bold "❌ ERROR:" "No option selected." >&2; return 1; fi
+
+            # --- Handle Selection (Using sed for Cleaning) ---
+            local selected_tag
+
+            if [ "$selected_option" == "Custom" ]; then
+                selected_tag=$(gum input --placeholder "Enter custom tag:" --prompt "$(gum style --bold 'Custom Tag >') ")
+                if [ $? -ne 0 ] || [ -z "$selected_tag" ]; then gum style --padding "0 1" --foreground=214 "🟡 Custom tag entry cancelled or empty."; return 1; fi
+                gum style --padding "0 1" "🏷️ Using custom tag: $(gum style --bold "$selected_tag")"
+            else
+                selected_tag=$(echo "$selected_option" | sed -e 's/ \[L, C\]$//' -e 's/ \[L\]$//' -e 's/ \[C\]$//')
+                selected_tag="${selected_tag%"${selected_tag##*[![:space:]]}"}"
+                selected_tag="${selected_tag#"${selected_tag%%*[![:space:]]}"}"
+                gum style --padding "0 1" "🏷️ Selected tag: $(gum style --bold "$selected_tag")"
+            fi
+
+            export CONTAINER_TAG_TO_USE="$selected_tag"
+        # We are in prod, so we use the image that was downloaded when it was built
         else
-            selected_tag=$(echo "$selected_option" | sed -e 's/ \[L, C\]$//' -e 's/ \[L\]$//' -e 's/ \[C\]$//')
-            selected_tag="${selected_tag%"${selected_tag##*[![:space:]]}"}"
-            selected_tag="${selected_tag#"${selected_tag%%*[![:space:]]}"}"
-            gum style --padding "0 1" "🏷️ Selected tag: $(gum style --bold "$selected_tag")"
+            export CONTAINER_TAG_TO_USE="$GLUEOPS_CODESPACES_CONTAINER_TAG"
         fi
-
-        export CONTAINER_TAG_TO_USE="$selected_tag"
-
         # --- Create Container ---
         mkdir -p /workspaces/glueops # Silent
 
