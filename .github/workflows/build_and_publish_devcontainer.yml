@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: codespaces
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout (GitHub)
