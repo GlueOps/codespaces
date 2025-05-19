@@ -307,7 +307,7 @@ GLUEOPSRC="$(declare -f dev)"
 echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
 
 # Now replace only the prod block's export line in .glueopsrc
-sudo sed -i '/else[[:space:]]*$/,/fi[[:space:]]*$/s|export CONTAINER_TAG_TO_USE=.*|export CONTAINER_TAG_TO_USE='"$GLUEOPS_CODESPACES_CONTAINER_TAG"'|' /home/vscode/.glueopsrc
+sudo sed -i 's|^export CONTAINER_TAG_TO_USE="\$GLUEOPS_CODESPACES_CONTAINER_TAG"$|export CONTAINER_TAG_TO_USE='"$GLUEOPS_CODESPACES_CONTAINER_TAG"'|' /home/vscode/.glueopsrc
 
 dev() {
     if [ "$(whoami)" != "vscode" ]; then
