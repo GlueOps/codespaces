@@ -246,9 +246,6 @@ dev() {
             fi
 
             export CONTAINER_TAG_TO_USE="$selected_tag"
-        # We are in prod, so we use the image that was downloaded when it was built
-        else
-            export CONTAINER_TAG_TO_USE="$GLUEOPS_CODESPACES_CONTAINER_TAG"
         fi
         # --- Create Container ---
         mkdir -p /workspaces/glueops # Silent
@@ -302,12 +299,9 @@ dev() {
     return $exec_status
 }
 
-
 GLUEOPSRC="$(declare -f dev)"
+echo "export CONTAINER_TAG_TO_USE=$GLUEOPS_CODESPACES_CONTAINER_TAG" | sudo tee -a /home/vscode/.glueopsrc
 echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
-
-# Now replace only the prod block's export line in .glueopsrc
-sudo sed -i 's|^export CONTAINER_TAG_TO_USE="\$GLUEOPS_CODESPACES_CONTAINER_TAG"$|export CONTAINER_TAG_TO_USE='"$GLUEOPS_CODESPACES_CONTAINER_TAG"'|' /home/vscode/.glueopsrc
 
 dev() {
     if [ "$(whoami)" != "vscode" ]; then
