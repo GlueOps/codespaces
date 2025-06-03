@@ -10,7 +10,7 @@ upload_diff() {
 # Function to handle version selection and helm upgrade
 handle_version_selection() {
     local component=$1
-    local argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -))   
+    local argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(15; .[]).version" | paste -sd' ' -))   
     local platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
     
     
@@ -21,13 +21,21 @@ handle_version_selection() {
             target_file="argocd.yaml"
             namespace="glueops-core"
             chart_name="argo/argo-cd"
-            
+            overrides_file="argocd.yaml"
 
         elif [ "$component" = "glueops-platform" ]; then
             versions=(${platform_version_string})
             target_file="platform.yaml"
+            overrides_file="platform.yaml"
             namespace="glueops-core"
             chart_name="glueops-platform/glueops-platform"
+
+            if gum confirm "Use overrides" \
+                --affirmative="Enabled" \
+                --negative="Not Enabled"
+            then
+                overrides_file="overrides.yaml"
+            fi
         fi
         version=$(gum choose "${versions[@]}" "Back")
         
@@ -38,8 +46,9 @@ handle_version_selection() {
         echo "chosen version: $version for $chart_name"
         
         # Running helm diff command
+
         
-        helm diff --color upgrade "$component" "$chart_name" --version "$version" -f $target_file -n $namespace | gum pager
+        helm diff --color upgrade "$component" "$chart_name" --version "$version" -f $target_file -f $overrides_file -n $namespace | gum pager
         
         if ! gum confirm "Apply upgrade"; then
             return
