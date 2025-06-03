@@ -3,6 +3,8 @@
 BUCKET_NAME="helm-diff"
 CAPTAIN_CLUSTER_NAME=$(basename $(pwd))
 
+helm repo update
+
 upload_diff() {
     gum log --structured --level info "Uploading helm-diff output to ..."
 }
