@@ -98,9 +98,7 @@ def find_eks_addons(filepath:str)-> dict[str,str]:
     return versions
 
 def find_ami_version(filepath:str)-> dict[str,str]:
-    with open(filepath, "r") as f:
-        hcl_content = f.read()
-    version = find_value("ami_release_version", hcl_content)
+    version = find_value("ami_release_version", filepath)
     if not version:
         print("ami_version not found")
         return {}
