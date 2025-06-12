@@ -126,9 +126,10 @@ lines = read_file(input_filepath)
 
 start = 12
 end = 0
-for item in lines:
+for idx, item in enumerate(lines):
     if "peering_configs" in item:
-        end = lines.index(item)-1
+        end = idx - 1
+        break
 
 if args.upgrade_addons:
     versions = find_eks_addons(versions_filepath)
