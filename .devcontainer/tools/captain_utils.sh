@@ -96,7 +96,7 @@ handle_helm_upgrades() {
         if ! gum confirm "Apply upgrade"; then
             return
         fi
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f $target_file -f $overrides_file -n $namespace --create-namespace --skip-crds
+        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --skip-crds
         return 
     done
 }
@@ -118,7 +118,7 @@ handle_kubernetes_version() {
 # Main menu loop
 while true; do
     # Show main menu
-    component=$(gum choose "argocd" "glueops-platform" "eks-addons" "upgrade-eks-nodepools" "upgrade-kuberenetes" "Exit")
+    component=$(gum choose "argocd" "glueops-platform" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit")
     
     # Handle exit option
     if [ "$component" = "Exit" ]; then
@@ -134,7 +134,7 @@ while true; do
         handle_terraform_nodepools
     fi
     
-    if [ "$component" = "upgrade-kuberenetes" ]; then
+    if [ "$component" = "upgrade-kubernetes" ]; then
         handle_kubernetes_version
     fi
 
