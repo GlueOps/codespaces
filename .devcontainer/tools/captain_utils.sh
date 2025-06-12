@@ -16,6 +16,7 @@ handle_helm_upgrades() {
     local platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
 
     while true; do
+        unset pre_commands helm_diff_cmd # Clear variables to avoid stale values
         local versions=() # Initialize versions array for each iteration
         local target_file=""
         local namespace=""

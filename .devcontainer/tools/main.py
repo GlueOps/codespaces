@@ -16,7 +16,7 @@ args = parser.parse_args()
 def read_file(filepath)-> list[str]:
     lines = []
     with open(filepath, 'r') as file:
-        for i, line in enumerate(file, 1):
+        for line in file:
             lines.append(line)
     return lines
 
