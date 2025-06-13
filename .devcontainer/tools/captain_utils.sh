@@ -55,6 +55,8 @@ handle_helm_upgrades() {
             return
         fi
         echo "chosen version: $version for $chart_name"
+
+        helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
         
         if [ "$component" = "argocd" ]; then
             # New: Select ArgoCD CRD version if argocd is chosen
@@ -84,20 +86,18 @@ handle_helm_upgrades() {
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
 
-        # Running helm diff command
-        gum style --bold "The following commands will be executed:"
-
-        helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
-
-        set -x
+       
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
-        set +x
         gum style --bold --foreground 212 "✅ Diff complete."
 
         if ! gum confirm "Apply upgrade"; then
             return
         fi
+        # Running helm diff command
+        gum style --bold "The following commands will be executed:"
+        set -x
         helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --skip-crds
+        set +x
         return 
     done
 }
