@@ -105,9 +105,9 @@ def find_ami_version(filepath:str)-> dict[str,str]:
     return {"ami_release_version": version}
 
 def find_eks_version(filepath:str):
-    version = find_value("eks_version", filepath)
+    version = find_value("kubernetes_version", filepath)
     if not version:
-        print("eks_version not found")
+        print("kubernetes_version not found")
         return None
     return version
 
