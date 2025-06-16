@@ -124,11 +124,14 @@ versions_filepath = f"{args.base_path}/VERSIONS/aws.yaml"
 
 lines = read_file(input_filepath)
 
-start = 12
+start = 0
 end = 0
 for idx, item in enumerate(lines):
     if "peering_configs" in item:
         end = idx - 1
+        break
+    if "private_subnets_enabled" in item:
+        start = idx + 2
         break
 
 if args.upgrade_addons:
