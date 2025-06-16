@@ -78,7 +78,7 @@ handle_helm_upgrades() {
         fi
         
         set -x
-        "${helm_diff_cmd[@]}" | gum pager
+        eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
         set +x
         
