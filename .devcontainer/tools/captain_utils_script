@@ -30,10 +30,11 @@ def write_file(filepath:str,lines:list[str]):
 def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str]):
     new_lines = []
     for line in lines[start:end]:
-        if '"name" :' in line:
-            index_line = line.replace('",\n','')
-            index = int(index_line.split("-")[-1])
-            line = line.replace(f"-{index}",f"-{index+1}")
+        match = re.match(r'\s*"name"\s*:\s*"(.+)-(\d+)"', line)
+        if match:
+            base_name, index = match.groups()
+            index = int(index)
+            line = line.replace(f"{base_name}-{index}", f"{base_name}-{index+1}")
         elif "ami_release_version" in line and ami_version:
             end_index = line.find('",')
             start_index = line.find(': "')
@@ -146,7 +147,7 @@ if args.upgrade_ami_version:
 
 if args.upgrade_kubernetes_version:
     version = find_eks_version(versions_filepath)
-    print(f"we're upgrading {version} to {version}")
+    print(f"we're upgrading to {version}")
     lines = upgrade_kubernetes_version(lines,f"{version}")
 
 write_file(output_filepath,lines)

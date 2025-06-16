@@ -8,13 +8,20 @@ helm repo update
 upload_diff() {
     gum log --structured --level info "Uploading helm-diff output to ..."
 }
+environment=production
 
 # Function to handle version selection and helm upgrade
 handle_helm_upgrades() {
     local component=$1
-    local argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -))   
-    local platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
-
+    # Handle exit option
+    if [ "$environment" = "production" ]; then
+        local argocd_version=($(cat VERSIONS/charts.yaml | yq '.versions.argocd_helm_chart_version'))
+        local platform_version_string=($(cat VERSIONS/charts.yaml | yq '.versions.glueops_platform_helm_chart_version'))
+    else
+        local argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -)) 
+        local platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
+    fi
+    
     while true; do
         unset pre_commands helm_diff_cmd # Clear variables to avoid stale values
         local versions=() # Initialize versions array for each iteration
@@ -38,11 +45,12 @@ handle_helm_upgrades() {
             namespace="glueops-core"
             chart_name="glueops-platform/glueops-platform"
 
-            if gum confirm "Use overrides" \
-                --affirmative="Enabled" \
-                --negative="Not Enabled"
-            then
+            if [ -e "overrides.yaml" ]; then
+                gum style --foreground 212 --bold "Overrides.yaml detected"
                 overrides_file="overrides.yaml"
+            else
+                gum style --foreground 212 --bold "No Overrides.yaml detected"
+                overrides_file="platform.yaml"
             fi
         else
             echo "Error: Invalid component '$component'. Please choose 'argocd' or 'glueops-platform'."
@@ -63,7 +71,6 @@ handle_helm_upgrades() {
             gum style --bold "Select ArgoCD CRD Version:"
             local argocd_crd_versions=($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))
             chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
-            helm_diff_cmd+=" --skip-crds"
             pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=v$chosen_crd_version\" && helm repo update"
         fi
 
@@ -85,7 +92,7 @@ handle_helm_upgrades() {
             set +x
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
-
+        set -x
        
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
@@ -119,6 +126,14 @@ handle_kubernetes_version() {
 # Main menu loop
 while true; do
     # Show main menu
+    environment=$(gum choose "dev" "production" "Exit")
+
+    # Handle exit option
+    if [ "$environment" = "Exit" ]; then
+        echo "Goodbye!"
+        exit 0
+    fi
+    
     component=$(gum choose "argocd" "glueops-platform" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit")
     
     # Handle exit option
