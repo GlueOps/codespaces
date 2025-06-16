@@ -2,7 +2,7 @@
 environment=production
 BUCKET_NAME="helm-diff"
 CAPTAIN_CLUSTER_NAME=$(basename $(pwd))
-
+set -e 
 helm repo update
 
 upload_diff() {
@@ -78,7 +78,7 @@ handle_helm_upgrades() {
         fi
         
         set -x
-        eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
+        "${helm_diff_cmd[@]}" | gum pager
         gum style --bold --foreground 212 "✅ Diff complete."
         set +x
         
