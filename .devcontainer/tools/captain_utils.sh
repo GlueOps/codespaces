@@ -103,16 +103,16 @@ handle_helm_upgrades() {
 }
 
 handle_terraform_addons() {
-    command_args=("python" "/usr/local/bin/main.py" "--upgrade-addons" "--base-path" $PWD)
+    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-addons" "--base-path" $PWD)
     "${command_args[@]}"
 }
 handle_terraform_nodepools() {
-    command_args=("python" "/usr/local/bin/main.py" "--upgrade-ami-version" "--base-path" $PWD)
+    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-ami-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
 handle_kubernetes_version() {
-    command_args=("python" "/usr/local/bin/main.py" "--upgrade-kubernetes-version" "--base-path" $PWD)
+    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-kubernetes-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
