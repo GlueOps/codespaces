@@ -109,7 +109,6 @@ RUN wget "https://releases.hashicorp.com/packer/${VERSION_HASHICORP_PACKER}/pack
 RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\ 
     sudo chmod +x /usr/local/bin/yq
 
-RUN pip install pyaml
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
     && sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg \
@@ -135,6 +134,8 @@ RUN echo "#!/bin/sh\n\
     fi\n\
     exec \"\$@\"" > /usr/local/share/docker-init.sh \
     && chmod +x /usr/local/share/docker-init.sh
+
+RUN pip install pyaml
 
 # VS Code overrides ENTRYPOINT and CMD when executing `docker run` by default.
 # Setting the ENTRYPOINT to docker-init.sh will configure non-root access to
