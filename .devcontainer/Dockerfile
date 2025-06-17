@@ -3,24 +3,23 @@
 # [Choice] Ubuntu version (use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon): ubuntu-22.04, ubuntu-20.04, ubuntu-18.04
 #https://mcr.microsoft.com/v2/devcontainers/base/tags/list
 #https://github.com/devcontainers/images/tree/main/src/base-ubuntu
-FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:06bd8d1c54fe699aa9b25eb90e2948637a1af2fd35d6284f661d3aeb6eb29b7b
+FROM mcr.microsoft.com/vscode/devcontainers/base:1-ubuntu-22.04@sha256:e6cac7682e119650eb1d55f403d4f27febee89782ec7eaea2b9100b2c543c39c
 
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 
-ARG VERSION_KUBECTL=1.30.11
+ARG VERSION_KUBECTL=1.30.13
 ARG VERSION_OPENTOFU=1.9.0
-ARG VERSION_HELM=3.17.2
-ARG VERSION_GCLOUD_SDK=515.0.0
-ARG VERSION_KIND=0.26.0
-ARG VERSION_K9S=0.40.7
-ARG VERSION_TERRAFORM_DOCS=0.19.0
+ARG VERSION_HELM=3.17.3
+ARG VERSION_KIND=0.28.0
+ARG VERSION_K9S=0.50.6
+ARG VERSION_TERRAFORM_DOCS=0.20.0
 ARG VERSION_KUBENT=0.7.3
-ARG VERSION_HELM_DIFF=3.10.0
-ARG VERSION_CHARM_GUM=0.14.5
-ARG VERSION_ARGO_CD_CLI=2.13.6
+ARG VERSION_HELM_DIFF=3.12.0
+ARG VERSION_CHARM_GUM=0.16.0
+ARG VERSION_ARGO_CD_CLI=2.14.12
 ARG VERSION_K3D=5.8.3
 ARG VERSION_HASHICORP_PACKER=1.11.2
 
@@ -56,24 +55,8 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v${VERSION_K3D} bash
 
 
-ENV CLOUDSDK_COMPONENT_MANAGER_FIXED_SDK_VERSION=${VERSION_GCLOUD_SDK}
-# Below includes cleanup to save space after the gcloud install: https://stackoverflow.com/questions/60827959/how-to-stop-gcloud-component-update-from-keeping-a-backup
-RUN curl -sSL https://sdk.cloud.google.com | bash \
-    && export PATH=$PATH:/usr/local/gcloud/google-cloud-sdk/bin \
-    && gcloud components install gke-gcloud-auth-plugin --quiet \
-    && gcloud components install alpha --quiet \
-    && gcloud components install beta --quiet \
-    && rm -rf $(find /usr/local/gcloud/google-cloud-sdk/ -regex ".*/__pycache__") \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/.install/.backup \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/lib/third_party/apis \
-    && rm -rf /usr/local/gcloud/google-cloud-sdk/bin/anthoscli \
-    && apt update \
-    && apt install tmux dnsutils telnet iputils-ping jq certbot nethogs nload vim -y \
-    && apt clean -y
-ENV PATH $PATH:/usr/local/gcloud/google-cloud-sdk/bin
-
 RUN apt update \
-    && apt install tmux dnsutils telnet iputils-ping jq certbot -y \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot nethogs nload vim -y \
     && apt clean -y
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v${VERSION_KIND}/kind-linux-amd64 \
     && chmod +x /usr/local/bin/kind
