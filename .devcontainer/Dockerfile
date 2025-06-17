@@ -106,6 +106,10 @@ RUN wget "https://releases.hashicorp.com/packer/${VERSION_HASHICORP_PACKER}/pack
     && rm packer_${VERSION_HASHICORP_PACKER}_linux_amd64.zip \
     && rm LICENSE.txt
 
+RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\ 
+    sudo chmod +x /usr/local/bin/yq
+
+RUN pip install pyaml
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
     && sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg \
