@@ -6,7 +6,6 @@ set -e
 
 run_prerequisite_commands(){
     helm repo update
-    pip install pyaml
 }
 
 upload_diff() {
