@@ -3,7 +3,11 @@ environment=production
 BUCKET_NAME="helm-diff"
 CAPTAIN_CLUSTER_NAME=$(basename $(pwd))
 set -e 
-helm repo update
+
+run_prerequisite_commands(){
+    helm repo update
+    pip install pyaml
+}
 
 upload_diff() {
     gum log --structured --level info "Uploading helm-diff output to ..."
@@ -147,7 +151,8 @@ handle_aws_options(){
    
 }
 
-# Main menu loop
+run_prerequisite_commands
+
 while true; do
     # Show main menu
     environment=$(gum choose "dev" "production" "Exit")
