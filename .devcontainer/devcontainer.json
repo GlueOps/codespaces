@@ -28,7 +28,8 @@
 		"node": "22.14.0",
 		"python": {
 			"version" : "3.11.11",
-			"installTools" : true
+			"installTools" : true,
+			"toolsToInstall": "flake8,autopep8,black,yapf,mypy,pydocstyle,pycodestyle,bandit,pipenv,virtualenv,pytest,pylint,pyaml"
 		}
 	}
 }
