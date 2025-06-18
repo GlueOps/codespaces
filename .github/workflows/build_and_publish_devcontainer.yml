@@ -37,4 +37,4 @@ jobs:
           imageTag: ${{ env.GITHUB_REF_SLUG }},latest
           push: always
           env:
-            VERSION: ${{ env.GITHUB_REF_SLUG }}
+            VERSION: "${{ env.GITHUB_REF_SLUG }}"
