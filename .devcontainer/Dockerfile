@@ -22,11 +22,13 @@ ARG VERSION_CHARM_GUM=0.16.0
 ARG VERSION_ARGO_CD_CLI=2.14.12
 ARG VERSION_K3D=5.8.3
 ARG VERSION_HASHICORP_PACKER=1.11.2
+ARG VERSION
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
+ENV VERSION=$VERSION
 
 COPY tools/ /etc/tools/
 

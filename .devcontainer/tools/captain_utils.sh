@@ -2,7 +2,9 @@
 environment=production
 BUCKET_NAME="helm-diff"
 CAPTAIN_CLUSTER_NAME=$(basename $(pwd))
-set -e 
+set -e
+set -u
+set -o pipefail
 
 run_prerequisite_commands(){
     helm repo update
@@ -12,16 +14,28 @@ upload_diff() {
     gum log --structured --level info "Uploading helm-diff output to ..."
 }
 
+show_diff_table(){
+    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--write-diff-csv" "--base-path" $PWD)
+    "${command_args[@]}"
+    /usr/bin/gum table \
+        --file ./captain_utils_diff.csv \
+        --separator "," \
+        --header.foreground "#FFAA00" \
+        --header.bold \
+        --cell.align "center" \
+        --cell.border-foreground "63"
+}
+
 # Function to handle version selection and helm upgrade
 handle_helm_upgrades() {
     local component=$1
     # Handle exit option
     if [ "$environment" = "production" ]; then
-        local argocd_version=($(cat VERSIONS/glueops.yaml | yq '.versions.argocd_helm_chart_version'))
-        local platform_version_string=($(cat VERSIONS/glueops.yaml | yq '.versions.glueops_platform_helm_chart_version'))
+        argocd_version=`yq '.versions[] | select(.name == "argocd_helm_chart_version") | .version' VERSIONS/glueops.yaml`
+        platform_version_string=`yq '.versions[] | select(.name == "glueops_platform_helm_chart_version") | .version' VERSIONS/glueops.yaml`
     else
-        local argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -)) 
-        local platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
+        argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -)) 
+        platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
     fi
     
     while true; do
@@ -113,16 +127,16 @@ handle_helm_upgrades() {
 }
 
 handle_terraform_addons() {
-    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-addons" "--base-path" $PWD)
+    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-addons" "--base-path" $PWD)
     "${command_args[@]}"
 }
 handle_terraform_nodepools() {
-    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-ami-version" "--base-path" $PWD)
+    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-ami-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
 handle_kubernetes_version() {
-    command_args=("python" "/usr/local/bin/captain_utils_script" "--upgrade-kubernetes-version" "--base-path" $PWD)
+    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-kubernetes-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
@@ -160,6 +174,11 @@ while true; do
     if [ "$environment" = "Exit" ]; then
         echo "Goodbye!"
         exit 0
+    fi
+
+    if [ "$environment" = "production" ]; then
+        gum style --bold --foreground 212 "Showing diff table before proceeding"
+        show_diff_table
     fi
     
     component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
