@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+
+from typing import Optional
+import re
+import argparse
+import yaml
+
+parser = argparse.ArgumentParser(prog='Manage Glueops tasks')
+parser.add_argument('--upgrade-addons', action="store_true")
+parser.add_argument('--upgrade-ami-version', action="store_true")
+parser.add_argument('--upgrade-kubernetes-version', action="store_true")
+parser.add_argument('--write-diff-csv', action="store_true")
+parser.add_argument('--base-path', required=True)
+
+
+args = parser.parse_args()
+
+
+def read_file(filepath)-> list[str]:
+    lines = []
+    with open(filepath, 'r') as file:
+        for line in file:
+            lines.append(line)
+    return lines
+
+def write_file(filepath:str,lines:list[str]):
+    with open(filepath, "w") as f:
+        for i in lines:
+            f.write(i)
+
+def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str]):
+    new_lines = []
+    for line in lines[start:end]:
+        match = re.match(r'^\s*#?\s*"name"\s*:\s*"([^"]+)"', line)
+        if match:
+            print(match)
+            base_name, index = match.groups()
+            index = int(index)
+            line = line.replace(f"{base_name}-{index}", f"{base_name}-{index+1}")
+        elif "ami_release_version" in line and ami_version:
+            end_index = line.find('",')
+            start_index = line.find(': "')
+            line = line.replace(line[start_index+3:end_index],ami_version)
+        new_lines.append(line)
+    return new_lines
+
+def add_new_node_pool(lines:list[str], start:int,end:int,ami_release_version:Optional[str]):
+    print("upgrading nodepool")
+    copied_lines = copy_lines(lines,start,end,ami_release_version)
+    lines[end-1] = lines[end-1].replace("}","},")
+    new_lines = lines[:end] + copied_lines + lines[end:]
+    return new_lines
+    
+def update_addons_version(lines:list[str], csi_driver_version:Optional[str],coredns_version:Optional[str],kube_proxy_version:Optional[str])->list[str]:
+    print("upgrading addons")
+    new_lines = []
+    for line in lines:
+        element = None
+        if 'csi_driver_version' in line and csi_driver_version:
+            element = csi_driver_version
+        if 'coredns_version' in line and coredns_version:
+            element = coredns_version
+        if 'kube_proxy_version' in line and kube_proxy_version: 
+            element = kube_proxy_version
+        if element:
+            start_index = line.find('= "')
+            end_index = line[start_index+3:].index('"')
+            line = line.replace(line[start_index+3:end_index+start_index+3],element)
+        new_lines.append(line)
+    return new_lines
+
+
+def upgrade_kubernetes_version(lines: list[str], eks_version:str):
+    print("updating kubernetes version")
+    new_lines = []
+    for line in lines:
+        element = None
+        if 'eks_version' in line and eks_version :
+            element = eks_version
+            start_index = line.find('= "')
+            end_index = line[start_index+3:].index('"')
+            line = line.replace(line[start_index+3:end_index+start_index+3],element)
+        new_lines.append(line)
+    return new_lines
+
+
+def find_value(key:str, filepath:str):
+    with open(filepath, 'r') as file:
+        yaml_file = yaml.safe_load(file)
+    
+    for item in yaml_file['versions']:
+        if item['name'] == key:
+            return item['version']
+    return None
+
+  
+def find_eks_addons(filepath:str,lines:list[str])-> dict[str,str]:
+    versions = {}
+    for key in EKS_ADDONS:
+        target_version = find_value(key, filepath)
+        current_version = target_version
+        
+        if not target_version:
+            print("ami_version not found")
+            return {}
+        for line in lines:
+            match = re.search(rf'^\s*{key}\s*=\s*"([^"]+)"', line)
+            # Check if a match was found and print the result
+            if match:
+                current_version = match.group(1)
+        if target_version:
+            versions[key] = {
+                "current": current_version,
+                "target": target_version
+            }
+    return versions
+
+def find_ami_version(filepath:str,lines:list[str])-> dict[str,str]:
+    target_version = find_value("ami_release_version", filepath)
+    current_version = None
+    if not target_version:
+        print("ami_version not found")
+        return {}
+
+    for line in lines:
+        match = re.search(r'^\s*#?\s*"ami_release_version"\s*:\s*"([^"]+)"', line)
+        # Check if a match was found and print the result
+        if match:
+            current_version = match.group(1)
+    
+    return {"ami_release_version": {
+        "current": current_version,
+        "target": target_version
+    }}
+
+def find_eks_version(version_filepath:str,lines:list[str]):
+    target_version = find_value("kubernetes_version", version_filepath)
+    current_version = target_version
+    if not target_version:
+        print("kubernetes_version not found")
+        return {}
+    for line in lines:
+        match = re.search(r'^\s*eks_version\s*=\s*"([^"]+)"', line)
+        # Check if a match was found and print the result
+        if match:
+            current_version = match.group(1)
+    return {"eks_version":{
+        "current": current_version,
+        "target": str(target_version)
+    }}
+
+def find_argocd_version(current_version_filepath:str,target_version_filepath:str):
+    target_version = find_value("argocd_helm_chart_version", current_version_filepath)
+    current_version = target_version
+    file_content_lines = read_file(target_version_filepath)
+    for line in file_content_lines:
+        match = re.search(r'deploy-argocd.*?-h\s+([\d.]+)', line)
+        if match:
+            current_version = match.group(1)
+    return {
+        "argocd_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+
+def find_platform_version(current_version_filepath:str,target_version_filepath:str):
+    current_version = None
+    target_version = find_value("glueops_platform_helm_chart_version", current_version_filepath)
+    
+    file_content_lines = read_file(target_version_filepath)
+    for line in file_content_lines:
+        match = re.search(r'deploy-glueops-platform.*?-v\s+(v[\d.]+|[\d.]+)', line)
+        if match:
+            current_version = match.group(1)
+    return {
+        "glueops_platform_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+        
+
+EKS_ADDONS = [
+    "csi_driver_version",
+    "coredns_version",
+    "kube_proxy_version"
+]
+
+input_filepath = f"{args.base_path}/terraform/kubernetes/main.tf"
+output_filepath = f"{args.base_path}/terraform/kubernetes/main.tf"
+versions_filepath = f"{args.base_path}/VERSIONS/aws.yaml"
+glueops_versions_filepath = f"{args.base_path}/VERSIONS/glueops.yaml"
+platform_file_filepath = f"{args.base_path}/README.md"
+argocd_file_filepath = f"{args.base_path}/README.md"
+
+
+lines = read_file(input_filepath)
+
+start = 0
+end = 0
+for idx, item in enumerate(lines):
+    if "peering_configs" in item:
+        end = idx - 1
+    if "private_subnets_enabled" in item:
+        start = idx + 2
+
+if args.upgrade_addons:
+    versions = find_eks_addons(versions_filepath,lines)
+    version_map = {}
+    for k,v in versions.items():
+        version_map[k] = v['target']
+    lines = update_addons_version(lines,**version_map)
+
+if args.upgrade_ami_version:
+    versions = find_ami_version(versions_filepath,lines)
+    lines = add_new_node_pool(lines,start,end,versions['ami_release_version']['target'])
+
+if args.upgrade_kubernetes_version:
+    version = find_eks_version(versions_filepath,lines)
+    print(f"we're upgrading to {version}")
+    lines = upgrade_kubernetes_version(lines,version['eks_version']['target'])
+
+if args.write_diff_csv:
+    versions = {}
+    versions.update(find_eks_addons(versions_filepath,lines))
+    versions.update(find_ami_version(versions_filepath,lines))
+    versions.update(find_eks_version(versions_filepath,lines))
+    versions.update(find_argocd_version(current_version_filepath=glueops_versions_filepath,target_version_filepath=argocd_file_filepath))
+    versions.update(find_platform_version(current_version_filepath=glueops_versions_filepath,target_version_filepath=platform_file_filepath))
+    with open("./captain_utils_diff.csv","w") as f:
+        f.write("Tool Name,Current,Planned,Status\n")
+        for name,value in versions.items():
+            f.write(f"{name},{value['current']},{value['target']},❌\n",)
+        
+
+write_file(output_filepath,lines)
