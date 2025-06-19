@@ -10,6 +10,16 @@ run_prerequisite_commands(){
     helm repo update
 }
 
+check_codespace_version_match(){
+    codespace_version=`yq '.versions[] | select(.name == "codespace_version") | .version' VERSIONS/glueops.yaml`
+    if [ "$codespace_version" != $VERSION ]; then
+        gum style --foreground 212 --bold "Current codespace version doesn't match with the desired: ${codespace_version}"
+        if ! gum confirm "Apply upgrade"; then
+            return 1
+        fi
+    fi
+}
+
 upload_diff() {
     gum log --structured --level info "Uploading helm-diff output to ..."
 }
@@ -164,6 +174,7 @@ handle_aws_options(){
    
 }
 
+check_codespace_version_match
 run_prerequisite_commands
 
 while true; do

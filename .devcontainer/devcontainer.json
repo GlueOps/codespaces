@@ -31,6 +31,6 @@
 			"installTools" : false
 		}
 	},
-	"postCreateCommand": "python -m venv /workspaces/glueops/shared-tools && /workspaces/glueops/shared-tools/bin/pip install flake8 autopep8 black yapf mypy pydocstyle pycodestyle bandit pipenv virtualenv pytest pyaml"
+	"postCreateCommand": "python -m venv /workspaces/glueops/shared-tools && /workspaces/glueops/shared-tools/bin/pip install pyaml==25.5.0"
 
 }
