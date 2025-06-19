@@ -31,9 +31,8 @@
 		"node": "22.14.0",
 		"python": {
 			"version" : "3.11.11",
-			"installTools" : false
+			"installTools" : true,
+			"toolsToInstall": "flake8,autopep8,black,yapf,mypy,pydocstyle,pycodestyle,bandit,pipenv,virtualenv,pytest,pylint,pyaml"
 		}
-	},
-	"postCreateCommand": "python -m venv /workspaces/glueops/shared-tools && /workspaces/glueops/shared-tools/bin/pip install pyaml==25.5.0"
-
+	}
 }

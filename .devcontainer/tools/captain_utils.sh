@@ -25,7 +25,7 @@ upload_diff() {
 }
 
 show_diff_table(){
-    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--write-diff-csv" "--base-path" $PWD)
+    command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--write-diff-csv" "--base-path" $PWD)
     "${command_args[@]}"
     /usr/bin/gum table \
         --file ./captain_utils_diff.csv \
@@ -137,16 +137,16 @@ handle_helm_upgrades() {
 }
 
 handle_terraform_addons() {
-    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-addons" "--base-path" $PWD)
+    command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-addons" "--base-path" $PWD)
     "${command_args[@]}"
 }
 handle_terraform_nodepools() {
-    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-ami-version" "--base-path" $PWD)
+    command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-ami-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
 handle_kubernetes_version() {
-    command_args=("/workspaces/glueops/shared-tools/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-kubernetes-version" "--base-path" $PWD)
+    command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--upgrade-kubernetes-version" "--base-path" $PWD)
     "${command_args[@]}"
 }
 
