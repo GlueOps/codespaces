@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 
+import json
+import os
 from typing import Optional
 import re
 import argparse
 import yaml
+import subprocess
+
 
 parser = argparse.ArgumentParser(prog='Manage Glueops tasks')
 parser.add_argument('--upgrade-addons', action="store_true")
@@ -96,18 +100,25 @@ def find_value(key:str, filepath:str):
   
 def find_eks_addons(filepath:str,lines:list[str])-> dict[str,str]:
     versions = {}
+    state_file = open(f"{args.base_path}/terraform/kubernetes/terraform.tfstate", "r")
+    state_json = json.loads(state_file.read())
+    tf_state_addons_map = {
+        "csi_driver_version": "ebs_csi",
+        "coredns_version": "coredns",
+        "kube_proxy_version": "kube_proxy"
+    }
     for key in EKS_ADDONS:
         target_version = find_value(key, filepath)
-        current_version = target_version
+        current_version = None
         
         if not target_version:
             print("ami_version not found")
             return {}
-        for line in lines:
-            match = re.search(rf'^\s*{key}\s*=\s*"([^"]+)"', line)
-            # Check if a match was found and print the result
-            if match:
-                current_version = match.group(1)
+        
+        for resource in state_json['resources']:
+            if resource['name'] == tf_state_addons_map[key] and resource['type'] == 'aws_eks_addon': 
+                current_version = resource['instances'][0]['attributes']['addon_version']
+                break
         if target_version:
             versions[key] = {
                 "current": current_version,
@@ -149,14 +160,19 @@ def find_eks_version(version_filepath:str,lines:list[str]):
         "target": str(target_version)
     }}
 
-def find_argocd_version(current_version_filepath:str,target_version_filepath:str):
-    target_version = find_value("argocd_helm_chart_version", current_version_filepath)
-    current_version = target_version
-    file_content_lines = read_file(target_version_filepath)
-    for line in file_content_lines:
-        match = re.search(r'deploy-argocd.*?-h\s+([\d.]+)', line)
-        if match:
-            current_version = match.group(1)
+def find_argocd_version(target_version_filepath:str):
+    target_version = find_value("argocd_helm_chart_version", target_version_filepath)
+    cmd = "helm list -A -o json | jq -r '.[] | select(.name == \"argocd\") | .chart' | awk -F'-' '{print $NF}'"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True, 
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        current_version = result.stdout.strip()
+    else:
+        current_version = "N/A"
     return {
         "argocd_version":{
             "current": current_version,
@@ -164,22 +180,26 @@ def find_argocd_version(current_version_filepath:str,target_version_filepath:str
         }
     }
 
-def find_platform_version(current_version_filepath:str,target_version_filepath:str):
-    current_version = None
-    target_version = find_value("glueops_platform_helm_chart_version", current_version_filepath)
-    
-    file_content_lines = read_file(target_version_filepath)
-    for line in file_content_lines:
-        match = re.search(r'deploy-glueops-platform.*?-v\s+(v[\d.]+|[\d.]+)', line)
-        if match:
-            current_version = match.group(1)
+def find_platform_version(target_version_filepath:str):
+    target_version = find_value("glueops_platform_helm_chart_version", target_version_filepath)
+    cmd = "helm list -A -o json | jq -r '.[] | select(.name == \"glueops-platform\") | .chart' | awk -F'-' '{print $NF}'"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        current_version = result.stdout.strip()
+    else:
+        current_version = "N/A"
     return {
         "glueops_platform_version":{
             "current": current_version,
             "target": target_version
         }
     }
-        
+
 
 EKS_ADDONS = [
     "csi_driver_version",
@@ -191,8 +211,6 @@ input_filepath = f"{args.base_path}/terraform/kubernetes/main.tf"
 output_filepath = f"{args.base_path}/terraform/kubernetes/main.tf"
 versions_filepath = f"{args.base_path}/VERSIONS/aws.yaml"
 glueops_versions_filepath = f"{args.base_path}/VERSIONS/glueops.yaml"
-platform_file_filepath = f"{args.base_path}/README.md"
-argocd_file_filepath = f"{args.base_path}/README.md"
 
 
 lines = read_file(input_filepath)
@@ -226,12 +244,13 @@ if args.write_diff_csv:
     versions.update(find_eks_addons(versions_filepath,lines))
     versions.update(find_ami_version(versions_filepath,lines))
     versions.update(find_eks_version(versions_filepath,lines))
-    versions.update(find_argocd_version(current_version_filepath=glueops_versions_filepath,target_version_filepath=argocd_file_filepath))
-    versions.update(find_platform_version(current_version_filepath=glueops_versions_filepath,target_version_filepath=platform_file_filepath))
+    versions.update(find_argocd_version(target_version_filepath=glueops_versions_filepath))
+    versions.update(find_platform_version(target_version_filepath=glueops_versions_filepath))
+    
     with open("./captain_utils_diff.csv","w") as f:
         f.write("Tool Name,Current,Planned,Status\n")
         for name,value in versions.items():
-            f.write(f"{name},{value['current']},{value['target']},❌\n",)
+            status = '✅' if value['current'] == value['target'] else '❌'
+            f.write(f"{name},{value['current']},{value['target']},{status}\n",)
         
-
 write_file(output_filepath,lines)

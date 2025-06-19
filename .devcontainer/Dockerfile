@@ -28,7 +28,7 @@ ARG VERSION
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
-ENV VERSION=$VERSION
+ENV VERSION=${VERSION}
 
 COPY tools/ /etc/tools/
 
