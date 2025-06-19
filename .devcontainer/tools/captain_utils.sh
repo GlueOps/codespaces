@@ -27,7 +27,7 @@ upload_diff() {
 show_diff_table(){
     command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--write-diff-csv" "--base-path" $PWD)
     "${command_args[@]}"
-    /usr/bin/gum table \
+    gum table \
         --file ./captain_utils_diff.csv \
         --separator "," \
         --header.foreground "#FFAA00" \
@@ -49,7 +49,8 @@ handle_helm_upgrades() {
     fi
     
     while true; do
-        unset pre_commands helm_diff_cmd # Clear variables to avoid stale values
+        unset helm_diff_cmd # Clear variables to avoid stale values
+        local pre_commands=""
         local versions=() # Initialize versions array for each iteration
         local target_file=""
         local namespace=""
