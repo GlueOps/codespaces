@@ -35,16 +35,15 @@ def write_file(filepath:str,lines:list[str]):
 def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str]):
     new_lines = []
     for line in lines[start:end]:
-        match = re.match(r'^\s*#?\s*"name"\s*:\s*"([^"]+)"', line)
-        if match:
-            print(match)
-            base_name, index = match.groups()
-            index = int(index)
-            line = line.replace(f"{base_name}-{index}", f"{base_name}-{index+1}")
-        elif "ami_release_version" in line and ami_version:
-            end_index = line.find('",')
-            start_index = line.find(': "')
-            line = line.replace(line[start_index+3:end_index],ami_version)
+        name_match = re.match(r'^\s*#?\s*"name"\s*:\s*"([^"]+)', line)
+        ami_match = re.match(r'^\s*"ami_release_version"\s*:\s*"([^"]+)"', line)
+        if name_match:
+            name = name_match.group()
+            index = int(name.split("-")[-1])
+            line = line.replace(f"{index}", f"{index+1}")
+        if ami_match and ami_version:
+            ami = ami_match.group(1) 
+            line = line.replace(ami,ami_version)
         new_lines.append(line)
     return new_lines
 
@@ -100,8 +99,11 @@ def find_value(key:str, filepath:str):
   
 def find_eks_addons(filepath:str,lines:list[str])-> dict[str,str]:
     versions = {}
-    state_file = open(f"{args.base_path}/terraform/kubernetes/terraform.tfstate", "r")
-    state_json = json.loads(state_file.read())
+    try:
+        state_file = open(f"{args.base_path}/terraform/kubernetes/terraform.tfstate", "r")
+        state_json = json.loads(state_file.read())
+    except FileNotFoundError:
+        return {}
     tf_state_addons_map = {
         "csi_driver_version": "ebs_csi",
         "coredns_version": "coredns",
@@ -195,7 +197,7 @@ def find_platform_version(target_version_filepath:str):
         current_version = "N/A"
     return {
         "glueops_platform_version":{
-            "current": current_version,
+            "current": f"v{current_version}",
             "target": target_version
         }
     }
