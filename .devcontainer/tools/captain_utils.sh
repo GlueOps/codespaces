@@ -14,7 +14,7 @@ check_codespace_version_match(){
     codespace_version=`yq '.versions[] | select(.name == "codespace_version") | .version' VERSIONS/glueops.yaml`
     if [ "$codespace_version" != $VERSION ]; then
         gum style --foreground 212 --bold "Current codespace version doesn't match with the desired: ${codespace_version}"
-        if ! gum confirm "Apply upgrade"; then
+        if ! gum confirm "Confirmation"; then
             return 1
         fi
     fi
@@ -96,7 +96,11 @@ handle_helm_upgrades() {
         if [ "$component" = "argocd" ]; then
             # New: Select ArgoCD CRD version if argocd is chosen
             gum style --bold "Select ArgoCD CRD Version:"
-            local argocd_crd_versions=($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))
+            if [ "$environment" = "production" ]; then
+                local argocd_crd_versions=`yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml`
+            else
+                local argocd_crd_versions=($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))
+            fi
             chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
             pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=v$chosen_crd_version\" && helm repo update"
             # Check if user wants to go back
@@ -131,7 +135,7 @@ handle_helm_upgrades() {
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
         set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --skip-crds
+        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace 
         set +x
         return 
     done
@@ -175,6 +179,59 @@ handle_aws_options(){
    
 }
 
+show_production(){
+    while true; do
+        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "Exit")
+        
+        # Handle exit option
+        if [ "$component" = "Exit" ]; then
+            echo "Goodbye!"
+            exit 0
+        fi
+
+        if [ "$component" = "show_diff_table" ]; then
+            gum style --bold --foreground 212 "Showing diff table before proceeding"
+            show_diff_table
+        fi
+
+        if [ "$component" = "aws" ]; then
+            handle_aws_options
+        fi
+
+        if [ "$component" = "glueops-platform" ]; then
+            handle_helm_upgrades $component
+        fi
+
+        if [ "$component" = "argocd" ]; then
+            handle_helm_upgrades $component
+        fi
+    done
+}
+
+show_dev(){
+    while true; do
+        component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
+        
+        # Handle exit option
+        if [ "$component" = "Exit" ]; then
+            echo "Goodbye!"
+            exit 0
+        fi
+
+        if [ "$component" = "aws" ]; then
+            handle_aws_options
+        fi
+
+        if [ "$component" = "glueops-platform" ]; then
+            handle_helm_upgrades $component
+        fi
+
+        if [ "$component" = "argocd" ]; then
+            handle_helm_upgrades $component
+        fi
+    done
+}
+
 check_codespace_version_match
 run_prerequisite_commands
 
@@ -189,30 +246,10 @@ while true; do
     fi
 
     if [ "$environment" = "production" ]; then
-        gum style --bold --foreground 212 "Showing diff table before proceeding"
-        show_diff_table
+        show_production
     fi
     
-    component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
-    
-    # Handle exit option
-    if [ "$component" = "Exit" ]; then
-        echo "Goodbye!"
-        exit 0
+    if [ "$environment" = "dev" ]; then
+        show_dev
     fi
-
-    # 
-
-    if [ "$component" = "aws" ]; then
-        handle_aws_options
-    fi
-
-    if [ "$component" = "glueops-platform" ]; then
-        handle_helm_upgrades $component
-    fi
-
-    if [ "$component" = "argocd" ]; then
-        handle_helm_upgrades $component
-    fi
-  
 done

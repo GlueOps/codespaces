@@ -181,6 +181,27 @@ def find_argocd_version(target_version_filepath:str):
             "target": target_version
         }
     }
+    
+def find_argocd_app_version(target_version_filepath:str):
+    target_version = find_value("argocd_app_version", target_version_filepath)
+    cmd = "kubectl get deployment -n glueops-core argocd-server -o jsonpath='{.metadata.labels}' | jq '.[\"app.kubernetes.io/version\"]'"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True, 
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        current_version = result.stdout.strip()
+    else:
+        current_version = "N/A"
+    return {
+        "argocd_app_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+
 
 def find_platform_version(target_version_filepath:str):
     target_version = find_value("glueops_platform_helm_chart_version", target_version_filepath)
@@ -201,6 +222,28 @@ def find_platform_version(target_version_filepath:str):
             "target": target_version
         }
     }
+
+def find_calico_helm_chart_version(target_version_filepath:str):
+    target_version = find_value("calico_helm_chart_version", target_version_filepath)
+    if not target_version: return {}
+    cmd = "helm list -A -o json | jq -r '.[] | select(.name == \"calico\") | .chart' | awk -F'-' '{print $NF}'"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        current_version = result.stdout.strip()
+    else:
+        current_version = "N/A"
+    return {
+        "calico_tiger_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+
 
 
 EKS_ADDONS = [
@@ -247,8 +290,9 @@ if args.write_diff_csv:
     versions.update(find_ami_version(versions_filepath,lines))
     versions.update(find_eks_version(versions_filepath,lines))
     versions.update(find_argocd_version(target_version_filepath=glueops_versions_filepath))
+    versions.update(find_argocd_app_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_platform_version(target_version_filepath=glueops_versions_filepath))
-    
+    versions.update(find_calico_helm_chart_version(target_version_filepath=glueops_versions_filepath))
     with open("./captain_utils_diff.csv","w") as f:
         f.write("Tool Name,Current,Planned,Status\n")
         for name,value in versions.items():
