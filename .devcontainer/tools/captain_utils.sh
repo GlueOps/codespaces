@@ -37,51 +37,27 @@ show_diff_table(){
 }
 
 # Function to handle version selection and helm upgrade
-handle_helm_upgrades() {
-    local component=$1
+handle_platform_upgrades() {
     # Handle exit option
     if [ "$environment" = "production" ]; then
-        argocd_version=`yq '.versions[] | select(.name == "argocd_helm_chart_version") | .version' VERSIONS/glueops.yaml`
         platform_version_string=`yq '.versions[] | select(.name == "glueops_platform_helm_chart_version") | .version' VERSIONS/glueops.yaml`
     else
-        argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -)) 
         platform_version_string=$(gh release list --repo GlueOps/platform-helm-chart-platform --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -)
     fi
     
     while true; do
-        unset helm_diff_cmd # Clear variables to avoid stale values
-        local pre_commands=""
-        local versions=() # Initialize versions array for each iteration
-        local target_file=""
-        local namespace=""
-        local chart_name=""
-        local overrides_file=""
-        local chosen_crd_version="" # To store the chosen CRD version
-        # Show version selection
-        if [ "$component" = "argocd" ]; then
-            versions=("${argocd_version[@]}")
-            target_file="argocd.yaml"
-            namespace="glueops-core"
-            chart_name="argo/argo-cd"
-            overrides_file="argocd.yaml"
+        versions=(${platform_version_string})
+        target_file="platform.yaml"
+        overrides_file="platform.yaml"
+        namespace="glueops-core"
+        chart_name="glueops-platform/glueops-platform"
 
-        elif [ "$component" = "glueops-platform" ]; then
-            versions=(${platform_version_string})
-            target_file="platform.yaml"
-            overrides_file="platform.yaml"
-            namespace="glueops-core"
-            chart_name="glueops-platform/glueops-platform"
-
-            if [ -e "overrides.yaml" ]; then
-                gum style --foreground 212 --bold "Overrides.yaml detected"
-                overrides_file="overrides.yaml"
-            else
-                gum style --foreground 212 --bold "No Overrides.yaml detected"
-                overrides_file="platform.yaml"
-            fi
+        if [ -e "overrides.yaml" ]; then
+            gum style --foreground 212 --bold "Overrides.yaml detected"
+            overrides_file="overrides.yaml"
         else
-            echo "Error: Invalid component '$component'. Please choose 'argocd' or 'glueops-platform'."
-            return 1 # Exit if component is invalid
+            gum style --foreground 212 --bold "No Overrides.yaml detected"
+            overrides_file="platform.yaml"
         fi
         version=$(gum choose "${versions[@]}" "Back")
         
@@ -93,20 +69,71 @@ handle_helm_upgrades() {
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
         
-        if [ "$component" = "argocd" ]; then
-            # New: Select ArgoCD CRD version if argocd is chosen
-            gum style --bold "Select ArgoCD CRD Version:"
-            if [ "$environment" = "production" ]; then
-                local argocd_crd_versions=`yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml`
-            else
-                local argocd_crd_versions=($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))
-            fi
-            chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
-            pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=v$chosen_crd_version\" && helm repo update"
-            # Check if user wants to go back
-            if [ "$chosen_crd_version" = "Back" ]; then
-                return
-            fi
+        set -x
+        eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
+        gum style --bold --foreground 212 "✅ Diff complete."
+        set +x
+        
+        if ! gum confirm "Apply upgrade"; then
+            return
+        fi
+        
+        # Running helm diff command
+        gum style --bold "The following commands will be executed:"
+        
+        set -x
+        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace 
+        set +x
+        return 
+    done
+}
+
+handle_argocd() {
+    if [ "$environment" = "production" ]; then
+        argocd_version=`yq '.versions[] | select(.name == "argocd_helm_chart_version") | .version' VERSIONS/glueops.yaml`
+    else
+        argocd_version=($(helm search repo  argo/argo-cd --versions -o json | jq -r "limit(30; .[]).version" | paste -sd' ' -)) 
+    fi
+    while true; do
+        unset helm_diff_cmd # Clear variables to avoid stale values
+        local pre_commands=""
+        local versions=() # Initialize versions array for each iteration
+        local chosen_crd_version="" # To store the chosen CRD version
+        # Show version selection
+        versions=("${argocd_version[@]}")
+        target_file="argocd.yaml"
+        namespace="glueops-core"
+        chart_name="argo/argo-cd"
+        overrides_file="argocd.yaml"
+        version=$(gum choose "${versions[@]}" "Back")
+        
+        # Check if user wants to go back
+        if [ "$version" = "Back" ]; then
+            return
+        fi
+        echo "chosen version: $version for $chart_name"
+
+        helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
+        
+        gum style --bold "Select ArgoCD CRD Version:"
+        if [ "$environment" = "production" ]; then
+            local argocd_crd_versions=`yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml`
+        else
+            local argocd_crd_versions=($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))
+        fi
+
+        # New: Select ArgoCD CRD version if argocd is chosen
+        gum style --bold "Select ArgoCD CRD Version:"
+        if [ "$environment" = "production" ]; then
+            local argocd_crd_versions=`yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml`
+        else
+            local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
+        fi
+        chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
+        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
+        # Check if user wants to go back
+        if [ "$chosen_crd_version" = "Back" ]; then
+            return
         fi
         
         set -x
@@ -135,10 +162,28 @@ handle_helm_upgrades() {
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
         set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace 
+        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --skip-crds
         set +x
         return 
     done
+
+}
+
+handle_calico_upgrades() {
+    calico_version=`yq '.versions[] | select(.name == "calico_helm_chart_version") | .version' VERSIONS/glueops.yaml`
+    remove_daemonset='kubectl delete daemonset -n kube-system aws-node'
+    gum style --bold --foreground 196 "Removing eks daemonset" 
+    set -x
+    ${remove_daemonset} || true
+    
+    gum style --bold --foreground 196 "Deploying calico helm chart ${calico_version}"
+    
+    helm repo add projectcalico https://docs.tigera.io/calico/charts
+    helm repo update
+    helm upgrade --install calico projectcalico/tigera-operator --version ${calico_version} --namespace tigera-operator -f calico.yaml --create-namespace
+    
+    set +x
+
 }
 
 handle_terraform_addons() {
@@ -156,7 +201,7 @@ handle_kubernetes_version() {
 }
 
 
-handle_aws_options(){
+handle_aws_options() {
     local aws_component=$(gum choose "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit")
     # Handle exit option
     if [ "$aws_component" = "Exit" ]; then
@@ -181,7 +226,7 @@ handle_aws_options(){
 
 show_production(){
     while true; do
-        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "Exit")
+        component=$(gum choose "show_diff_table" "calico" "argocd" "glueops-platform" "aws" "Exit")
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -199,18 +244,22 @@ show_production(){
         fi
 
         if [ "$component" = "glueops-platform" ]; then
-            handle_helm_upgrades $component
+            handle_platform_upgrades
         fi
 
         if [ "$component" = "argocd" ]; then
-            handle_helm_upgrades $component
+            handle_argocd
+        fi
+        
+        if [ "$component" = "calico" ]; then
+            handle_calico_upgrades
         fi
     done
 }
 
 show_dev(){
     while true; do
-        component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
+        component=$(gum choose "calico" "argocd" "glueops-platform" "aws" "Exit")
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -223,11 +272,15 @@ show_dev(){
         fi
 
         if [ "$component" = "glueops-platform" ]; then
-            handle_helm_upgrades $component
+            handle_platform_upgrades
         fi
 
         if [ "$component" = "argocd" ]; then
-            handle_helm_upgrades $component
+            handle_argocd
+        fi
+
+        if [ "$component" = "calico" ]; then
+            handle_calico_upgrades
         fi
     done
 }
