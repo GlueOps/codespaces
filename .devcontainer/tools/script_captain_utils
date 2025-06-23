@@ -114,8 +114,8 @@ def find_eks_addons(filepath:str,lines:list[str])-> dict[str,str]:
         current_version = None
         
         if not target_version:
-            print("ami_version not found")
-            return {}
+            print(f"{key} not found")
+            continue
         
         for resource in state_json['resources']:
             if resource['name'] == tf_state_addons_map[key] and resource['type'] == 'aws_eks_addon': 
@@ -146,15 +146,23 @@ def find_ami_version(filepath:str,lines:list[str])-> dict[str,str]:
         "target": target_version
     }}
 
-def find_eks_version(version_filepath:str,lines:list[str]):
+def find_kubernetes_version(version_filepath:str):
     target_version = find_value("kubernetes_version", version_filepath)
-    current_version = target_version
+    current_version = None
     if not target_version:
         print("kubernetes_version not found")
         return {}
-    for line in lines:
-        match = re.search(r'^\s*eks_version\s*=\s*"([^"]+)"', line)
-        # Check if a match was found and print the result
+    cmd = "kubectl version --client=false"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True, 
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        kubectl_vesion_output = result.stdout.strip()
+        match = re.search(r"Server Version: v(\d+\.\d+)", kubectl_vesion_output)
+
         if match:
             current_version = match.group(1)
     return {"eks_version":{
@@ -288,7 +296,7 @@ if args.write_diff_csv:
     versions = {}
     versions.update(find_eks_addons(versions_filepath,lines))
     versions.update(find_ami_version(versions_filepath,lines))
-    versions.update(find_eks_version(versions_filepath,lines))
+    versions.update(find_kubernetes_version(versions_filepath))
     versions.update(find_argocd_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_argocd_app_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_platform_version(target_version_filepath=glueops_versions_filepath))
