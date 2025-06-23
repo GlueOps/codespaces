@@ -27,6 +27,7 @@ upload_diff() {
 show_diff_table(){
     command_args=("/usr/local/py-utils/venvs/pyaml/bin/python" "/usr/local/bin/script_captain_utils" "--write-diff-csv" "--base-path" $PWD)
     "${command_args[@]}"
+    gum style --foreground 196 --bold "Note: any field that contains aestrick(*) is not live version" 
     gum table \
         --file ./captain_utils_diff.csv \
         --separator "," \

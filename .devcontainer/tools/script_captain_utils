@@ -246,7 +246,50 @@ def find_calico_helm_chart_version(target_version_filepath:str):
     else:
         current_version = "N/A"
     return {
-        "calico_tiger_version":{
+        "calico_helm_chart_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+
+def find_tigera_operator_version(target_version_filepath:str):
+    target_version = find_value("tigera_operator_version", target_version_filepath)
+    if not target_version: return {}
+    cmd = "kubectl get deployment tigera-operator -n tigera-operator -o jsonpath=\"{.spec.template.spec.containers[0].image}\""
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        version_output = result.stdout.strip()
+        current_version = version_output.split(":")[1]
+    else:
+        current_version = "N/A"
+    return {
+        "tigera_operator_version":{
+            "current": current_version,
+            "target": target_version
+        }
+    }
+    
+def find_calico_ctl_version(target_version_filepath:str):
+    target_version = find_value("calico_ctl_version", target_version_filepath)
+    if not target_version: return {}
+    cmd = "helm list -A -o json | jq -r '.[] | select(.name == \"calico\") | .chart' | awk -F'-' '{print $NF}'"
+    result = subprocess.run(
+        cmd,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if result.returncode == 0 and result.stdout:
+        current_version = result.stdout.strip()
+    else:
+        current_version = "N/A"
+    return {
+        "calico_ctl_version":{
             "current": current_version,
             "target": target_version
         }
@@ -288,7 +331,7 @@ if args.upgrade_ami_version:
     lines = add_new_node_pool(lines,start,end,versions['ami_release_version']['target'])
 
 if args.upgrade_kubernetes_version:
-    version = find_eks_version(versions_filepath,lines)
+    version = find_kubernetes_version(versions_filepath,lines)
     print(f"we're upgrading to {version}")
     lines = upgrade_kubernetes_version(lines,version['eks_version']['target'])
 
@@ -301,6 +344,8 @@ if args.write_diff_csv:
     versions.update(find_argocd_app_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_platform_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_calico_helm_chart_version(target_version_filepath=glueops_versions_filepath))
+    versions.update(find_tigera_operator_version(target_version_filepath=glueops_versions_filepath))
+    versions.update(find_calico_ctl_version(target_version_filepath=glueops_versions_filepath))
     with open("./captain_utils_diff.csv","w") as f:
         f.write("Tool Name,Current,Planned,Status\n")
         for name,value in versions.items():
