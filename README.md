@@ -20,7 +20,7 @@ python --version
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
-- Please tag the release as a `pre-release` this will prevent it from being pulled by production users whie it's still building. Once the QMEU pipeline has finished, and after you have tested the `pre-release` go ahead and update the release to `latest release`. [Here is a quick video on promoting from pre-release to the latest release](https://github.com/user-attachments/assets/e94b4b34-9aa7-4440-a3d7-8c49cf32f2ea)
+- Please tag the release as a `pre-release` this will prevent it from being pulled by production users whie it's still building. Once the AWS/QMEU/etc. pipelines have finished, and after you have tested the `pre-release` go ahead and update the release to `latest release`. [Here is a quick video on promoting from pre-release to the latest release](https://github.com/user-attachments/assets/e94b4b34-9aa7-4440-a3d7-8c49cf32f2ea)
 
 
 
@@ -39,7 +39,19 @@ To test a `pre-release` you will first to do the following:
 
 # Local Dev / Running packer locally:
 
-It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, `export` the applicable environment variables before running the `packer build` command.
+It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command.
+
+
+### Running AWS:
+
+
+```bash
+export AWS_ACCESS_KEY_ID="XXXXXXXXXXXXXXXXX"
+export AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXX"
+packer init aws.pkr.hcl
+packer build -var glueops_codespaces_container_tag=v0.71.0 aws.pkr.hcl
+```
+
 
 _Note:_ v0.71.0 is the latest version at the time of creating this README.md you can check for the latest version here: https://github.com/GlueOps/codespaces/releases
 

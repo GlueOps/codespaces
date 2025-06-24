@@ -1,0 +1,47 @@
+name: Packer build AWS
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish devcontainer image"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      glueops_codespace_tag:
+        description: 'Enter the github.com/glueops/codespaces tag to use (e.g. v0.60.0)'
+        required: false
+
+jobs:
+  build:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug Print Ref Info
+        run: |
+          echo "inputs.glueops_codespace_tag: ${{ inputs.glueops_codespace_tag }}"
+          echo "event.workflow_run.head_branch: ${{ github.event.workflow_run.head_branch }}"
+          echo "event.workflow_run.head_sha: ${{ github.event.workflow_run.head_sha }}"
+          echo "github.ref: ${{ github.ref }}"
+          echo "event_name: ${{ github.event_name }}"
+          
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_sha }}
+
+      - name: Setup `packer`
+        uses: hashicorp/setup-packer@1aa358be5cf73883762b302a3a03abd66e75b232 # v3.1.0
+        id: setup
+        with:
+          version: 1.11.2
+
+      - name: Run `packer init`
+        id: init
+        run: packer init aws.pkr.hcl
+
+      - name: Run `packer build`
+        id: build
+        run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} aws.pkr.hcl
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
