@@ -316,8 +316,8 @@ end = 0
 for idx, item in enumerate(lines):
     if "peering_configs" in item:
         end = idx - 1
-    if "private_subnets_enabled" in item:
-        start = idx + 2
+    if "node_pools" in item:
+        start = idx + 1
 
 if args.upgrade_addons:
     versions = find_eks_addons(versions_filepath,lines)
