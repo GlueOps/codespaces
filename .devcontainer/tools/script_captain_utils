@@ -346,7 +346,7 @@ if args.write_diff_csv:
     versions.update(find_calico_helm_chart_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_tigera_operator_version(target_version_filepath=glueops_versions_filepath))
     versions.update(find_calico_ctl_version(target_version_filepath=glueops_versions_filepath))
-    with open("./captain_utils_diff.csv","w") as f:
+    with open("/tmp/captain_utils_diff.csv","w") as f:
         f.write("Tool Name,Current,Planned,Status\n")
         for name,value in versions.items():
             status = '✅' if value['current'] == value['target'] else '❌'
