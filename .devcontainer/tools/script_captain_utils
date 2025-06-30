@@ -150,7 +150,7 @@ def find_terraform_module_version(filepath:str,lines:list[str])-> dict[str,str]:
     target_version = find_value("terraform_module_version", filepath)
     current_version = None
     if not target_version:
-        print("ami_version not found")
+        print("terraform_module_version not found")
         return {}
 
     for line in lines:
