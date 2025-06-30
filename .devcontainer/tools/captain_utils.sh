@@ -29,7 +29,7 @@ show_diff_table(){
     "${command_args[@]}"
     gum style --foreground 196 --bold "Note: any field that contains aestrick(*) is not live version" 
     gum table \
-        --file ./captain_utils_diff.csv \
+        --file /tmp/captain_utils_diff.csv \
         --separator "," \
         --header.foreground "#FFAA00" \
         --header.bold \
