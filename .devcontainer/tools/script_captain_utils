@@ -32,11 +32,12 @@ def write_file(filepath:str,lines:list[str]):
         for i in lines:
             f.write(i)
 
-def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str]):
+def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str],current_kubernetes_version:str):
     new_lines = []
     for line in lines[start:end]:
         name_match = re.match(r'^\s*#?\s*"name"\s*:\s*"([^"]+)', line)
         ami_match = re.match(r'^\s*"ami_release_version"\s*:\s*"([^"]+)"', line)
+        kubernetes_version_match = re.match(r'^\s*#?\s*"kubernetes_version"\s*:\s*"(\d+\.\d+)"', line)
         if name_match:
             name = name_match.group()
             index = int(name.split("-")[-1])
@@ -44,12 +45,15 @@ def copy_lines(lines:list[str],start:int,end:int,ami_version:Optional[str]):
         if ami_match and ami_version:
             ami = ami_match.group(1) 
             line = line.replace(ami,ami_version)
+        if kubernetes_version_match:
+            nodepool_kubernetes_version = kubernetes_version_match.group(1)
+            line = line.replace(nodepool_kubernetes_version,current_kubernetes_version)
         new_lines.append(line)
     return new_lines
 
-def add_new_node_pool(lines:list[str], start:int,end:int,ami_release_version:Optional[str]):
+def add_new_node_pool(lines:list[str], start:int,end:int,ami_release_version:Optional[str],current_kubernetes_version:str):
     print("upgrading nodepool")
-    copied_lines = copy_lines(lines,start,end,ami_release_version)
+    copied_lines = copy_lines(lines,start,end,ami_release_version,current_kubernetes_version)
     lines[end-1] = lines[end-1].replace("}","},")
     new_lines = lines[:end] + copied_lines + lines[end:]
     return new_lines
@@ -347,10 +351,11 @@ if args.upgrade_addons:
 
 if args.upgrade_ami_version:
     versions = find_ami_version(versions_filepath,lines)
-    lines = add_new_node_pool(lines,start,end,versions['ami_release_version']['target'])
+    kubernetes_version = find_kubernetes_version(versions_filepath)
+    lines = add_new_node_pool(lines,start,end,versions['ami_release_version']['target'],kubernetes_version['eks_version']['current'])
 
 if args.upgrade_kubernetes_version:
-    version = find_kubernetes_version(versions_filepath,lines)
+    version = find_kubernetes_version(versions_filepath)
     print(f"we're upgrading to {version}")
     lines = upgrade_kubernetes_version(lines,version['eks_version']['target'])
 
