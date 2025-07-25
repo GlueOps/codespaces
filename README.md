@@ -61,7 +61,7 @@ _Note:_ v0.71.0 is the latest version at the time of creating this README.md you
 If you are having issues spinning up a VM using our automation, just create a VM/Server with a provider of your choice and run these commands:
 
 ```bash
-export GLUEOPS_CODESPACES_CONTAINER_TAG=v0.92.0 #update tag to latest version found here: https://github.com/GlueOps/codespaces/releases
+export GLUEOPS_CODESPACES_CONTAINER_TAG=v0.97.2 #update tag to latest version found here: https://github.com/GlueOps/codespaces/releases
 curl -sL setup.glueops.dev | bash
 sudo tailscale up --ssh --accept-routes
 ```
