@@ -63,7 +63,7 @@ If you are having issues spinning up a VM using our automation, just create a VM
 ```bash
 export GLUEOPS_CODESPACES_CONTAINER_TAG=v0.97.2 #update tag to latest version found here: https://github.com/GlueOps/codespaces/releases
 curl -sL setup.glueops.dev | bash
-sudo tailscale up --ssh --accept-routes
+sudo tailscale up --ssh
 ```
 
 _Note:_ as of April 2025 we have been using Debian 12 as our base Operating System. It's possible Debian 13 or newer work but we haven't tested it yet.
