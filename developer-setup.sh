@@ -86,7 +86,6 @@ WantedBy=multi-user.target
 
 EOF
 
-sudo systemctl daemon-reexec
 sudo systemctl daemon-reload
 sudo systemctl enable launch-dev.service
 
