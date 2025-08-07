@@ -71,7 +71,7 @@ gum --version
 #Setup systemd service for dev command
 sudo tee /etc/systemd/system/launch-dev.service > /dev/null <<'EOF'
 [Unit]
-Description=Call dev function from vscode's bashrc
+Description=Call dev function from .glueopsrc
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -79,6 +79,7 @@ Wants=network-online.target
 Type=oneshot
 User=vscode
 ExecStart=/bin/bash -c "source /home/vscode/.glueopsrc && dev"
+RemainAfterExit=true
 
 [Install]
 WantedBy=multi-user.target
