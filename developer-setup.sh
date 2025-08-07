@@ -68,6 +68,28 @@ echo "✅ 'gum' installed successfully to /usr/bin/gum"
 echo "   Verify with: gum --version"
 gum --version
 
+#Setup systemd service for dev command
+sudo tee /etc/systemd/system/launch-dev.service > /dev/null <<'EOF'
+[Unit]
+Description=Call dev function from vscode's bashrc
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vscode
+ExecStart=/bin/bash -c "source /home/vscode/.glueopsrc && dev"
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable launch-dev.service
+
 ### Finish GUM install
 
 
