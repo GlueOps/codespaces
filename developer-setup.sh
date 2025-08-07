@@ -79,7 +79,6 @@ Wants=network-online.target
 Type=oneshot
 User=vscode
 ExecStart=/bin/bash -c "source /home/vscode/.glueopsrc && dev"
-RemainAfterExit=true
 
 [Install]
 WantedBy=multi-user.target
