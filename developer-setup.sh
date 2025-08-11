@@ -86,13 +86,13 @@ WantedBy=multi-user.target
 
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable launch-dev.service
-
 ### Finish GUM install
 
 
 dev() {
+    if ! sudo systemctl is-enabled --quiet launch-dev.service; then
+        sudo systemctl enable launch-dev.service
+    fi
     # --- Tmux Handling ---
     # Ensure we are inside a tmux session named 'dev'
     if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
