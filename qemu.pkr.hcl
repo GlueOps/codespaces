@@ -7,7 +7,6 @@ variable "image_password" {
 }
 
 source "qemu" "qemu-amd64" {
-  accelerator       = "kvm"
   iso_url           = "https://cloud.debian.org/images/cloud/bookworm/daily/latest/debian-12-generic-amd64-daily.qcow2"
   iso_checksum      = "file:https://cloud.debian.org/images/cloud/bookworm/daily/latest/SHA512SUMS"
   disk_image        = true
