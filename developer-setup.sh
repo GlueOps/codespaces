@@ -20,7 +20,12 @@ echo "vscode ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/vscode > /dev/nul
 
 echo "Installing other requirements now"
 
-curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh && sudo apt-get update && sudo apt install tmux jq figlet -y && sudo apt-get clean
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo apt-get update
+sudo apt install tmux jq figlet qemu-guest-agent -y
+sudo apt-get clean
+
 #export DEBIAN_FRONTEND=noninteractive
 #sudo apt-get -s dist-upgrade | grep "^Inst" | grep -i securi | awk -F " " {'print $2'} | xargs sudo apt-get install -y
 sudo groupadd -f docker
@@ -63,10 +68,31 @@ echo "✅ 'gum' installed successfully to /usr/bin/gum"
 echo "   Verify with: gum --version"
 gum --version
 
+#Setup systemd service for dev command
+sudo tee /etc/systemd/system/launch-dev.service > /dev/null <<'EOF'
+[Unit]
+Description=Call dev function from .glueopsrc
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=vscode
+ExecStart=/bin/bash -c "source /home/vscode/.glueopsrc && dev"
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
 ### Finish GUM install
 
 
 dev() {
+    if ! sudo systemctl is-enabled --quiet launch-dev.service; then
+        sudo systemctl enable launch-dev.service
+    fi
     # --- Tmux Handling ---
     # Ensure we are inside a tmux session named 'dev'
     if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
