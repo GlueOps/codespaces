@@ -41,21 +41,6 @@ To test a `pre-release` you will first to do the following:
 
 It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command.
 
-
-### Running AWS:
-
-
-```bash
-export AWS_ACCESS_KEY_ID="XXXXXXXXXXXXXXXXX"
-export AWS_SECRET_ACCESS_KEY="XXXXXXXXXXXXXXXXX"
-packer init aws.pkr.hcl
-packer build -var glueops_codespaces_container_tag=v0.71.0 aws.pkr.hcl
-```
-
-
-_Note:_ v0.71.0 is the latest version at the time of creating this README.md you can check for the latest version here: https://github.com/GlueOps/codespaces/releases
-
-
 ### Break Glass Setup
 
 If you are having issues spinning up a VM using our automation, just create a VM/Server with a provider of your choice and run these commands:
