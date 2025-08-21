@@ -16,6 +16,12 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: codespaces
     steps:
+      - name: Enable KVM group perms
+        run: |
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+
       - name: Debug Print Ref Info
         run: |
           echo "inputs.glueops_codespace_tag: ${{ inputs.glueops_codespace_tag }}"
@@ -38,21 +44,18 @@ jobs:
       - name: Generate image password
         run: echo "IMAGE_PASSWORD=$(openssl rand -base64 16)" >> $GITHUB_ENV
 
-      - name: Generate cloud-init iso
+      - name: Generate cloud-init data
         run: |
-          sudo apt install genisoimage
           echo '#cloud-config
           chpasswd:
             expire: False
             users:
             - {name: debian, password: '"$IMAGE_PASSWORD"', type: text}
           ssh_pwauth: True' > user-data
-          echo 'instance-id: iid-local01
-          local-hostname: localhost' > meta-data
-          genisoimage -output ci-data.iso -volid cidata -joliet -rock user-data meta-data
-      
-      - name: Install qemu
-        run: sudo apt-get update && sudo apt-get install qemu-system -y
+          echo '' > meta-data
+
+      - name: Install runner dependencies
+        run: sudo apt-get update && sudo apt-get install qemu-system genisoimage -y
       
       - name: Run packer init
         id: init
