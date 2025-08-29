@@ -222,7 +222,7 @@ handle_aws_options() {
 
 handle_inspect_pods() {
     gum style --bold --foreground 212 "Inspecting pods in the cluster"
-    kubectl get pods --watch -A | grep "Pending\|CrashLoopBackOff\|Error\|ContainerCreating\|ImagePullBackOff\"
+    watch -n 2 'kubectl get pods -A | grep "Pending\|CrashLoopBackOff\|Error\|ContainerCreating\|ImagePullBackOff\|ErrImagePull" || true'
 }
 
 show_production(){
