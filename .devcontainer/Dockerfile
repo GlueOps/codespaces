@@ -143,9 +143,6 @@ RUN mkdir -p /home/vscode/.local/share/helm/plugins \
 RUN git config --global --add --bool push.autoSetupRemote true
 
 # devtunnel cli for more advanced control over port forwarding
-RUN curl -sL https://aka.ms/DevTunnelCliInstall | bash
-
-
 # Add backup warning to .zshrc for vscode user
 RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
