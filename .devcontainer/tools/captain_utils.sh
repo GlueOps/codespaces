@@ -217,14 +217,18 @@ handle_aws_options() {
     if [ "$aws_component" = "upgrade-kubernetes" ]; then
         handle_kubernetes_version
     fi
-
    
+}
+
+handle_inspect_pods() {
+    gum style --bold --foreground 212 "Inspecting pods in the cluster"
+    watch -n 5 'kubectl get pods -A | grep "Pending\|CrashLoopBackOff\|Error\|ContainerCreating\|ImagePullBackOff\|ErrImagePull" || true'
 }
 
 show_production(){
     while true; do
-        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "Exit")
-        
+        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
+
         # Handle exit option
         if [ "$component" = "Exit" ]; then
             echo "Goodbye!"
@@ -248,6 +252,9 @@ show_production(){
             handle_argocd
         fi
         
+        if [ "$component" = "inspect_pods" ]; then
+            handle_inspect_pods
+        fi
        
     done
 }
