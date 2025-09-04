@@ -362,7 +362,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
-  echo "Please manually run: docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:<TAG> before you run `dev`"
+  echo "Please manually run: docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:<TAG> before you run 'dev'"
 else
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
