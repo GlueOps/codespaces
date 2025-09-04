@@ -220,7 +220,7 @@ dev() {
 
             # --- Check Cached Images ---
             local cached_images
-            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "mirror.gpkg.io/glueops/mirror/glueops/codespaces")
+            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces")
 
             # --- Prepare Options for Gum (Using Simplified Markers) ---
             local options=()
@@ -292,7 +292,7 @@ dev() {
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
                 -w /workspaces/glueops \
-                "mirror.gpkg.io/glueops/mirror/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
+                "replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
              gum style --padding "0 1" --foreground=196 --bold \
                 "❌ ERROR:" "Failed to create or start container '$CONTAINER_NAME' with tag '$CONTAINER_TAG_TO_USE'." >&2
              # Added suggestion from previous step, kept simple
@@ -362,12 +362,10 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
+  echo "Please manually run: docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:<TAG> before you run 'dev'"
 else
-  # If the variable is set, pull the Docker image using the tag
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
-  sudo docker pull ghcr.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG
-  # The glueops/mirror replication has a delay of 5-20minutes. This re-tagging is to leverage the mirror endpoint and still be able to use an existing cache.
-  sudo docker tag ghcr.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG mirror.gpkg.io/glueops/mirror/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG
+  until sudo docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
 fi
 
 echo -e "\n\n\n\n\nPlease reboot using: sudo reboot \n\n"
