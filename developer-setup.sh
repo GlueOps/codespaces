@@ -362,12 +362,10 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
+  echo "Please manually run: docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:<TAG> before you run `dev`"
 else
-  # If the variable is set, pull the Docker image using the tag
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
-  # The glueops/mirror replication has a delay of 5-20minutes. This re-tagging is to leverage the mirror endpoint and still be able to use an existing cache.
-  sudo docker tag ghcr.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG
 fi
 
 echo -e "\n\n\n\n\nPlease reboot using: sudo reboot \n\n"
