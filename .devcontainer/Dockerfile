@@ -144,6 +144,18 @@ RUN git config --global --add --bool push.autoSetupRemote true
 
 RUN curl -sL https://aka.ms/DevTunnelCliInstall | bash
 
+RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
+  sudo gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg && \
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" | \
+  sudo tee /etc/apt/sources.list.d/1password.list && \
+  sudo mkdir -p /etc/debsig/policies/AC2D62742012EA22/ && \
+  curl -sS https://downloads.1password.com/linux/debian/debsig/1password.pol | \
+  sudo tee /etc/debsig/policies/AC2D62742012EA22/1password.pol && \
+  sudo mkdir -p /usr/share/debsig/keyrings/AC2D62742012EA22 && \
+  curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
+  sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg && \
+  sudo apt update && sudo apt install 1password-cli
+
 # Add backup warning to .zshrc for vscode user
 RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
