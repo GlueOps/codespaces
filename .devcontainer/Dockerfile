@@ -10,7 +10,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:ea0615c10
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 
-ARG VERSION_KUBECTL=1.32.7
+ARG VERSION_KUBECTL=1.34.1
 ARG VERSION_OPENTOFU=1.9.2
 ARG VERSION_HELM=3.17.4
 ARG VERSION_KIND=0.28.0
