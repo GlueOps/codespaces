@@ -1,7 +1,10 @@
 name: 'Build and Publish devcontainer image' 
+ 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
