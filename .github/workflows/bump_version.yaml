@@ -5,6 +5,7 @@ on:
     # The "*" (#42, asterisk) character has special semantics in YAML, so this
     # string has to be quoted.
     - cron: '0 0 */2 * *'
+   workflow_dispatch:
 
 jobs:
   call-workflow-passing-data:
@@ -14,4 +15,4 @@ jobs:
 
     uses: GlueOps/github-workflows/.github/workflows/bump-version-cut-release.yaml@main
     secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      token: ${{ secrets.CREATE_REPO_RELEASE }}
