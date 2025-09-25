@@ -42,7 +42,7 @@ jobs:
           version: 1.11.2
 
       - name: Generate image password
-        run: echo "IMAGE_PASSWORD=$(openssl rand -base64 16)" >> $GITHUB_ENV
+        run: echo "IMAGE_PASSWORD=pass1234debug" >> $GITHUB_ENV
 
       - name: Generate cloud-init data
         run: |
