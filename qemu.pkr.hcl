@@ -16,7 +16,7 @@ source "qemu" "qemu-amd64" {
   format            = "qcow2"
   vm_name           = "${var.glueops_codespaces_container_tag}.qcow2"
   ssh_username      = "debian"
-  ssh_password      = "pass1234debug"
+  ssh_password      = "${var.image_password}"
   shutdown_command  = "sudo fstrim -av && sudo shutdown -P now"
   headless          = true
   ssh_wait_timeout  = "5m"
