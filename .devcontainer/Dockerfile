@@ -10,17 +10,29 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:ea0615c10
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 
+# renovate: datasource=github-tags depName=kubernetes/kubectl extractVersion=^kubernetes-(?<version>.*)$
 ARG VERSION_KUBECTL=1.32.9
+# renovate: datasource=github-tags depName=opentofu/opentofu
 ARG VERSION_OPENTOFU=1.9.4
+# renovate: datasource=github-tags depName=helm/helm
 ARG VERSION_HELM=3.18.6
+# renovate: datasource=github-tags depName=kubernetes-sigs/kind
 ARG VERSION_KIND=0.30.0
+# renovate: datasource=github-tags depName=derailed/k9s
 ARG VERSION_K9S=0.50.13
+# renovate: datasource=github-tags depName=terraform-docs/terraform-docs
 ARG VERSION_TERRAFORM_DOCS=0.20.0
+# renovate: datasource=github-tags depName=doitintl/kube-no-trouble
 ARG VERSION_KUBENT=0.7.3
+# renovate: datasource=github-tags depName=databus23/helm-diff
 ARG VERSION_HELM_DIFF=3.13.0
+# renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
+# renovate: datasource=github-tags depName=argoproj/argo-cd
 ARG VERSION_ARGO_CD_CLI=2.14.20
+# renovate: datasource=github-tags depName=k3d-io/k3d
 ARG VERSION_K3D=5.8.3
+# renovate: datasource=github-tags depName=hashicorp/packer
 ARG VERSION_HASHICORP_PACKER=1.11.2
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
