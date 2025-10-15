@@ -10,7 +10,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:ea0615c10
 #     && apt-get -y install --no-install-recommends <your-package-list-here>
 
 
-# renovate: datasource=github-tags depName=kubernetes/kubernetes extractVersion=^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$
+# renovate: datasource=github-tags depName=kubernetes/kubectl
 ARG VERSION_KUBECTL=1.32.9
 # renovate: datasource=github-tags depName=opentofu/opentofu
 ARG VERSION_OPENTOFU=1.9.4
