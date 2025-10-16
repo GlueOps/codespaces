@@ -3,7 +3,7 @@
 # [Choice] Ubuntu version (use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon): ubuntu-22.04, ubuntu-20.04, ubuntu-18.04
 #https://mcr.microsoft.com/v2/devcontainers/base/tags/list
 #https://github.com/devcontainers/images/tree/main/src/base-ubuntu
-FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:ea0615c10a5f04649532bf84aca5e1d987357bc76f29d490ac3890f45f7fbf37
+FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:81380e4c9c14e8a629ff39029639e4b7893e67400246fa7782a0fe7dc193a02a
 
 # [Optional] Uncomment this section to install additional OS packages.
 # RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
