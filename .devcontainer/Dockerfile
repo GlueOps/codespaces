@@ -15,7 +15,7 @@ ARG VERSION_KUBECTL=1.32.9
 # renovate: datasource=github-tags depName=opentofu/opentofu
 ARG VERSION_OPENTOFU=1.10.7
 # renovate: datasource=github-tags depName=helm/helm
-ARG VERSION_HELM=3.18.6
+ARG VERSION_HELM=3.19.2
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
 ARG VERSION_KIND=0.30.0
 # renovate: datasource=github-tags depName=derailed/k9s
