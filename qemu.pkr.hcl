@@ -25,8 +25,8 @@ source "qemu" "qemu-amd64" {
   cd_files          = ["user-data", "meta-data"]
   cd_label          = "cidata"
   qemuargs          = [
-    ["-m", "4096M"],
-    ["-smp", "2"]
+    ["-m", "12288M"],
+    ["-smp", "4"]
   ]
 }
 
