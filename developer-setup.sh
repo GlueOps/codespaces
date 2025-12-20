@@ -220,7 +220,7 @@ dev() {
 
             # --- Check Cached Images ---
             local cached_images
-            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces")
+            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.repo.gpkg.io/glueops/codespaces")
 
             # --- Prepare Options for Gum (Using Simplified Markers) ---
             local options=()
@@ -292,7 +292,7 @@ dev() {
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
                 -w /workspaces/glueops \
-                "replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
+                "ghcr.repo.gpkg.io/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
              gum style --padding "0 1" --foreground=196 --bold \
                 "❌ ERROR:" "Failed to create or start container '$CONTAINER_NAME' with tag '$CONTAINER_TAG_TO_USE'." >&2
              # Added suggestion from previous step, kept simple
@@ -362,10 +362,10 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
-  echo "Please manually run: docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:<TAG> before you run 'dev'"
+  echo "Please manually run: docker pull ghcr.repo.gpkg.io/glueops/codespaces:<TAG> before you run 'dev'"
 else
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
-  until sudo docker pull replicas.mirror.gpkg.io/proxy-ghcr-io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
+  until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
 fi
 
 echo -e "\n\n\n\n\nPlease reboot using: sudo reboot \n\n"
