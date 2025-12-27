@@ -33,7 +33,7 @@ ARG VERSION_ARGO_CD_CLI=3.0.20
 # renovate: datasource=github-tags depName=k3d-io/k3d
 ARG VERSION_K3D=5.8.3
 # renovate: datasource=github-tags depName=hashicorp/packer
-ARG VERSION_HASHICORP_PACKER=1.14.2
+ARG VERSION_HASHICORP_PACKER=1.14.3
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
