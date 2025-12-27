@@ -17,7 +17,7 @@ ARG VERSION_OPENTOFU=1.10.7
 # renovate: datasource=github-tags depName=helm/helm
 ARG VERSION_HELM=3.19.2
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
-ARG VERSION_KIND=0.30.0
+ARG VERSION_KIND=0.31.0
 # renovate: datasource=github-tags depName=derailed/k9s
 ARG VERSION_K9S=0.50.16
 # renovate: datasource=github-tags depName=terraform-docs/terraform-docs
