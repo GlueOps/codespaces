@@ -7,7 +7,7 @@ function gluekube_ssh() {
     local OUTER_ARGS=("$@")
 
     if [[ -z "$BASTION_HOST" || -z "$TARGET_IP" || -z "$LOCAL_PEM" ]]; then
-        echo "Usage: jump_cluster <BASTION_IP> <TARGET_IP> <LOCAL_PEM> [SSH_FLAGS]"
+        echo "Usage: gluekube_ssh <BASTION_IP> <TARGET_IP> <LOCAL_PEM> [SSH_FLAGS]"
         echo "gluekube_ssh 157.180.22.11 157.180.11.11 bastion.pem -L 6443:127.0.0.1:6443"
         return 1
     fi
