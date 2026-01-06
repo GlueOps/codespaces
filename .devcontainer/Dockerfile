@@ -176,7 +176,6 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     chown vscode:vscode /home/vscode/.zshrc
 
 USER root
-RUN mkdir -p /home/vscode/.kube
 RUN chown -R vscode:vscode /home/vscode
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
 CMD [ "sleep", "infinity" ]
