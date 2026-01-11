@@ -349,6 +349,9 @@ browse_infrastructure() {
                     menu_options+=("🔗 SSH to servers" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
                 fi
                 
+                # Add cluster action options (cluster exists in AutoGlue)
+                menu_options+=("⚡ Cluster Actions")
+                
                 # Add clone option if there's a matched repo
                 if [[ -n "$matched_repo" ]]; then
                     menu_options+=("📦 Clone GitHub Repo ($matched_repo)")
@@ -389,6 +392,9 @@ browse_infrastructure() {
                         ;;
                     "⚙️ Setup ~/.kube/config")
                         kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        ;;
+                    "⚡ Cluster Actions")
+                        cluster_actions_mode "$cluster_id" "$org_id"
                         ;;
                     📦*)
                         clone_repo_mode "$matched_repo" "development-captains"
@@ -634,6 +640,350 @@ kubeconfig_mode() {
     echo ""
     read -n 1 -s -r -p "Press any key to continue..." || true
     echo ""
+}
+
+# Helper function to format ISO8601 timestamp to readable format
+format_timestamp() {
+    local timestamp="$1"
+    
+    if [[ -z "$timestamp" ]] || [[ "$timestamp" == "N/A" ]] || [[ "$timestamp" == "null" ]]; then
+        echo "N/A"
+        return
+    fi
+    
+    # Convert ISO8601 to readable format: "2026-01-11 09:44 UTC"
+    date -u -d "$timestamp" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "$timestamp"
+}
+
+# Helper function to calculate relative time
+relative_time() {
+    local timestamp="$1"
+    
+    if [[ -z "$timestamp" ]] || [[ "$timestamp" == "N/A" ]] || [[ "$timestamp" == "null" ]]; then
+        echo "N/A"
+        return
+    fi
+    
+    local now=$(date +%s)
+    local then=$(date -d "$timestamp" +%s 2>/dev/null || echo "0")
+    
+    if [[ "$then" == "0" ]]; then
+        echo "unknown"
+        return
+    fi
+    
+    local diff=$((now - then))
+    
+    if [[ $diff -lt 0 ]]; then
+        diff=$((diff * -1))
+    fi
+    
+    if [[ $diff -lt 60 ]]; then
+        echo "${diff}s ago"
+    elif [[ $diff -lt 3600 ]]; then
+        local minutes=$((diff / 60))
+        echo "${minutes}m ago"
+    elif [[ $diff -lt 86400 ]]; then
+        local hours=$((diff / 3600))
+        echo "${hours}h ago"
+    else
+        local days=$((diff / 86400))
+        echo "${days}d ago"
+    fi
+}
+
+# Cluster actions mode - submenu for trigger and view
+cluster_actions_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    while true; do
+        clear
+        local action_choice
+        action_choice=$(gum choose --header="Cluster Actions - What would you like to do?" \
+            "🚀 Trigger" \
+            "📊 View" \
+            "◀ Back" || true)
+        
+        case "$action_choice" in
+            "🚀 Trigger")
+                run_actions_mode "$cluster_id" "$org_id"
+                ;;
+            "📊 View")
+                view_runs_mode "$cluster_id" "$org_id"
+                ;;
+            "◀ Back"|"")
+                return
+                ;;
+        esac
+    done
+}
+
+# Run actions mode - list available actions and trigger cluster runs
+run_actions_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    # Action selection loop
+    while true; do
+        clear
+        echo "Fetching available actions..."
+        
+        # Fetch actions from API
+        local actions
+        actions=$(api_call GET "/admin/actions" "$org_id" 2>/dev/null)
+        
+        # Check if actions were fetched successfully
+        if [[ -z "$actions" ]] || [[ "$actions" == "null" ]]; then
+            gum style --foreground 196 "✗ Failed to fetch actions or no actions available"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Check if actions array is empty
+        local action_count
+        action_count=$(echo "$actions" | jq 'length' 2>/dev/null)
+        if [[ "$action_count" == "0" ]]; then
+            gum style --foreground 208 "No actions available"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Build action list with format: [label] description|action_id
+        local action_list
+        action_list=$(echo "$actions" | jq -r '.[] | "[\(.label)] \(.description // "No description")|\(.id)"')
+        
+        if [[ -z "$action_list" ]]; then
+            gum style --foreground 196 "✗ No actions found"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Show action selection menu
+        local action_display
+        action_display=$(echo "$action_list" | cut -d'|' -f1)
+        
+        local action_selection
+        action_selection=$(echo -e "$action_display\n◀ Back" | gum choose --header="Select action to run:" || true)
+        
+        # Handle ESC or Back
+        if [[ -z "$action_selection" ]] || [[ "$action_selection" == "◀ Back" ]]; then
+            return
+        fi
+        
+        # Extract action ID
+        local action_id
+        action_id=$(echo "$action_list" | grep -F "$action_selection" | cut -d'|' -f2)
+        
+        # Confirm action execution
+        if ! gum confirm "Run action: $action_selection?"; then
+            continue
+        fi
+        
+        echo ""
+        echo "Triggering cluster run..."
+        
+        # Trigger cluster run
+        local run_response
+        run_response=$(curl -s -X POST \
+            -H "X-API-KEY: $API_KEY" \
+            -H "X-Org-ID: $org_id" \
+            "$API_ENDPOINT/clusters/$cluster_id/actions/$action_id/runs" 2>/dev/null)
+        
+        # Check if run was created successfully
+        local run_id
+        run_id=$(echo "$run_response" | jq -r '.id // empty' 2>/dev/null)
+        
+        if [[ -n "$run_id" ]]; then
+            local run_status
+            run_status=$(echo "$run_response" | jq -r '.status // "unknown"')
+            gum style --foreground 82 "✓ Cluster run created successfully"
+            echo "Run ID: $run_id"
+            echo "Status: $run_status"
+        else
+            local error_msg
+            error_msg=$(echo "$run_response" | jq -r '.message // "Unknown error"' 2>/dev/null)
+            gum style --foreground 196 "✗ Failed to create cluster run"
+            echo "Error: $error_msg"
+        fi
+        
+        echo ""
+        read -n 1 -s -r -p "Press any key to continue..." || true
+        echo ""
+    done
+}
+
+# View runs mode - show cluster runs with status tracking
+view_runs_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    # Run selection loop
+    while true; do
+        clear
+        echo "Fetching cluster runs..."
+        
+        # Fetch cluster runs
+        local runs
+        runs=$(api_call GET "/clusters/$cluster_id/runs" "$org_id" 2>/dev/null)
+        
+        # Check if runs were fetched successfully
+        if [[ -z "$runs" ]] || [[ "$runs" == "null" ]]; then
+            gum style --foreground 196 "✗ Failed to fetch cluster runs"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Check if runs array is empty
+        local run_count
+        run_count=$(echo "$runs" | jq 'length' 2>/dev/null)
+        if [[ "$run_count" == "0" ]]; then
+            gum style --foreground 208 "No cluster runs found"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Build run list with color-coded status
+        local run_list=""
+        while IFS='|' read -r run_id action status created_at; do
+            local status_icon
+            case "$status" in
+                succeeded)
+                    status_icon="✓"
+                    ;;
+                running|queued)
+                    status_icon="⏳"
+                    ;;
+                failed)
+                    status_icon="✗"
+                    ;;
+                *)
+                    status_icon="•"
+                    ;;
+            esac
+            local formatted_time=$(format_timestamp "$created_at")
+            local relative=$(relative_time "$created_at")
+            run_list+="[$status_icon $status] $action - $formatted_time ($relative)|$run_id"$'\n'
+        done < <(echo "$runs" | jq -r '.[] | "\(.id)|\(.action)|\(.status)|\(.created_at)"' | awk -F'|' '{print $1 "|" $2 "|" $3 "|" $4}')
+        
+        # Add Refresh option
+        local run_display
+        run_display=$(echo "$run_list" | cut -d'|' -f1)
+        
+        local run_selection
+        run_selection=$(echo -e "$run_display\n🔄 Refresh\n◀ Back" | gum choose --header="Select run to view details:" || true)
+        
+        # Handle ESC or Back
+        if [[ -z "$run_selection" ]] || [[ "$run_selection" == "◀ Back" ]]; then
+            return
+        fi
+        
+        # Handle Refresh
+        if [[ "$run_selection" == "🔄 Refresh" ]]; then
+            continue
+        fi
+        
+        # Extract run ID
+        local selected_run_id
+        selected_run_id=$(echo "$run_list" | grep -F "$run_selection" | cut -d'|' -f2)
+        
+        # Detail view loop with auto-refresh for active runs
+        while true; do
+            # Fetch detailed run info
+            clear
+            echo "Fetching run details..."
+            
+            local run_detail
+            run_detail=$(api_call GET "/clusters/$cluster_id/runs/$selected_run_id" "$org_id" 2>/dev/null)
+            
+            if [[ -n "$run_detail" ]] && [[ "$run_detail" != "null" ]]; then
+                clear
+                gum style --border rounded --padding "1 2" "Cluster Run Details"
+                echo ""
+                
+                local detail_id detail_action detail_status detail_error detail_created detail_updated detail_finished
+                detail_id=$(echo "$run_detail" | jq -r '.id // "N/A"')
+                detail_action=$(echo "$run_detail" | jq -r '.action // "N/A"')
+                detail_status=$(echo "$run_detail" | jq -r '.status // "N/A"')
+                detail_error=$(echo "$run_detail" | jq -r '.error // "None"')
+                detail_created=$(echo "$run_detail" | jq -r '.created_at // "N/A"')
+                detail_updated=$(echo "$run_detail" | jq -r '.updated_at // "N/A"')
+                detail_finished=$(echo "$run_detail" | jq -r '.finished_at // "N/A"')
+                
+                # Format timestamps
+                local formatted_created=$(format_timestamp "$detail_created")
+                local relative_created=$(relative_time "$detail_created")
+                local formatted_updated=$(format_timestamp "$detail_updated")
+                local relative_updated=$(relative_time "$detail_updated")
+                local formatted_finished=$(format_timestamp "$detail_finished")
+                local relative_finished=$(relative_time "$detail_finished")
+                
+                echo "ID: $detail_id"
+                echo "Action: $detail_action"
+                
+                # Color-code status
+                case "$detail_status" in
+                    succeeded)
+                        echo -n "Status: "
+                        gum style --foreground 82 "✓ $detail_status"
+                        ;;
+                    running|queued)
+                        echo -n "Status: "
+                        gum style --foreground 208 "⏳ $detail_status"
+                        ;;
+                    failed)
+                        echo -n "Status: "
+                        gum style --foreground 196 "✗ $detail_status"
+                        ;;
+                    *)
+                        echo "Status: $detail_status"
+                        ;;
+                esac
+                
+                echo "Created: $formatted_created ($relative_created)"
+                echo "Updated: $formatted_updated ($relative_updated)"
+                echo "Finished: $formatted_finished ($relative_finished)"
+                
+                if [[ -n "$detail_error" ]] && [[ "$detail_error" != "None" ]] && [[ "$detail_error" != "null" ]]; then
+                    echo ""
+                    gum style --foreground 196 "Error:"
+                    echo "$detail_error"
+                fi
+                
+                # Auto-refresh for active runs
+                if [[ "$detail_status" == "running" ]] || [[ "$detail_status" == "queued" ]]; then
+                    echo ""
+                    echo "(Auto-refreshing in 3s... Press any key to return to list)"
+                    if read -t 3 -n 1 -s -r 2>/dev/null; then
+                        break
+                    fi
+                    # Continue loop to refresh
+                else
+                    # Run completed, wait for user input
+                    echo ""
+                    read -n 1 -s -r -p "Press any key to continue..." || true
+                    echo ""
+                    break
+                fi
+            else
+                gum style --foreground 196 "✗ Failed to fetch run details"
+                echo ""
+                read -n 1 -s -r -p "Press any key to continue..." || true
+                echo ""
+                break
+            fi
+        done
+    done
 }
 
 # Clone GitHub repo mode
