@@ -168,7 +168,7 @@ add_profile_interactive() {
     esac
     
     # Validate
-    gum spin --spinner dot --title "Validating API key..." -- sleep 1
+    echo "Validating API key..."
     
     API_KEY="$api_key"
     API_ENDPOINT="$endpoint"
@@ -176,7 +176,7 @@ add_profile_interactive() {
     if validate_api_key; then
         add_profile "$name" "$api_key" "$endpoint"
         gum style --foreground 82 "✓ Profile '$name' added successfully!"
-        sleep 2
+        sleep 1
     else
         gum style --foreground 196 "✗ API key validation failed!"
         sleep 2
@@ -209,9 +209,8 @@ delete_profile_interactive() {
 browse_infrastructure() {
     # Organization selection loop
     while true; do
+        clear
         # List orgs
-        gum spin --spinner dot --title "Loading organizations..." -- sleep 0.5
-        
         local orgs
         orgs=$(api_call GET "/orgs")
         
@@ -224,152 +223,218 @@ browse_infrastructure() {
         fi
         
         local org_selection
-        org_selection=$(echo -e "$(echo "$org_choices" | cut -d'|' -f1)\n◀ Back" | gum choose --header="Select organization:")
+        org_selection=$(echo -e "$(echo "$org_choices" | cut -d'|' -f1)\n◀ Back" | gum choose --header="Select organization:" || true)
         
-        if [[ -z "$org_selection" ]]; then
+        # Handle ESC or Back
+        if [[ -z "$org_selection" ]] || [[ "$org_selection" == "◀ Back" ]]; then
             return
         fi
-        
-        [[ "$org_selection" == "◀ Back" ]] && return
         
         local org_id
         org_id=$(echo "$org_choices" | grep "^$org_selection|" | cut -d'|' -f2)
         
-        # Cluster selection loop
+        # Get all GitHub repos from the organization that match the selected org suffix
+        local gh_org="development-captains"
+        local all_repos=""
+        if command -v gh &> /dev/null; then
+            all_repos=$(gh repo list "$gh_org" --limit 200 --json name -q '.[].name' 2>/dev/null | grep "\\.${org_selection}$" || true)
+        fi
+        
+        # Repository/Cluster selection loop
         while true; do
-            # List clusters
-            gum spin --spinner dot --title "Loading clusters..." -- sleep 0.5
+            clear
+            # If no repos found, fall back to showing clusters
+            if [[ -z "$all_repos" ]]; then
+                echo "No GitHub repositories found for this organization"
+                break
+            fi
             
+            # Show repository selection menu
+            local repo_selection
+            repo_selection=$(echo -e "$all_repos\n◀ Back" | gum choose --header="Select cluster:" || true)
+            
+            # Handle ESC or Back
+            if [[ -z "$repo_selection" ]] || [[ "$repo_selection" == "◀ Back" ]]; then
+                break
+            fi
+            
+            local cluster_selection="$repo_selection"
+            local matched_repo="$repo_selection"
+            
+            # List clusters to find matching cluster ID
             local clusters
             clusters=$(api_call GET "/clusters" "$org_id")
             
             local cluster_choices
-            cluster_choices=$(echo "$clusters" | jq -r '.[] | "\(.name)|\(.id)"')
-            
-            if [[ -z "$cluster_choices" ]]; then
-                gum style --foreground 196 "No clusters found"
-                sleep 2
-                break
-            fi
-            
-            local cluster_selection
-            cluster_selection=$(echo -e "$(echo "$cluster_choices" | cut -d'|' -f1)\n◀ Back" | gum choose --header="Select cluster:")
-            
-            if [[ -z "$cluster_selection" ]]; then
-                break
-            fi
-            
-            [[ "$cluster_selection" == "◀ Back" ]] && break
+            cluster_choices=$(echo "$clusters" | jq -r '.[] | "\(.name)|\(.id)"' || true)
             
             local cluster_id
-            cluster_id=$(echo "$cluster_choices" | grep "^$cluster_selection|" | cut -d'|' -f2)
+            cluster_id=$(echo "$cluster_choices" | grep "^${cluster_selection}|" | cut -d'|' -f2 || true)
+            
+            # Check if cluster exists in AutoGlue
+            if [[ -z "$cluster_id" ]]; then
+                # Cluster doesn't exist in AutoGlue, only show clone repo option
+                if [[ -n "$matched_repo" ]]; then
+                    local mode
+                    mode=$(gum choose --header="What would you like to do?" "📦 Clone GitHub Repo ($matched_repo)" "◀ Back" || true)
+                    
+                    case "$mode" in
+                        📦*)
+                            clone_repo_mode "$matched_repo" "development-captains"
+                            ;;
+                        *)
+                            continue
+                            ;;
+                    esac
+                else
+                    echo "This cluster is not managed in AutoGlue and has no GitHub repo"
+                fi
+                continue
+            fi
     
-    # Get full cluster details
-    gum spin --spinner dot --title "Loading servers..." -- sleep 0.5
+            # Get full cluster details
+            local cluster
+            cluster=$(api_call GET "/clusters/$cluster_id" "$org_id")
     
-    local cluster
-    cluster=$(api_call GET "/clusters/$cluster_id" "$org_id")
+            # Get cluster status
+            local cluster_status
+            cluster_status=$(echo "$cluster" | jq -r '.status // "unknown"')
     
-    # Get bastion
-    local bastion_ip
-    bastion_ip=$(echo "$cluster" | jq -r '.bastion_server.public_ip_address // empty')
+            # Get bastion
+            local bastion_ip
+            bastion_ip=$(echo "$cluster" | jq -r '.bastion_server.public_ip_address // empty')
+            
+            # Get bastion SSH key ID for later use
+            local bastion_key_id
+            bastion_key_id=$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')
+            
+            # Collect all unique SSH key IDs from the cluster
+            local all_ssh_key_ids
+            all_ssh_key_ids=$(echo "$cluster" | jq -r '[.bastion_server.ssh_key_id, .node_pools[].servers[].ssh_key_id] | unique | .[] | select(. != null and . != "")' | tr '\n' ' ')
+            
+            # List servers from all node pools AND include bastion
+            local servers=""
+            
+            # Add bastion server first
+            local bastion_hostname
+            bastion_hostname=$(echo "$cluster" | jq -r '.bastion_server.hostname // empty')
+            if [[ -n "$bastion_hostname" ]]; then
+                local bastion_status
+                bastion_status=$(echo "$cluster" | jq -r '.bastion_server.status // "ready"')
+                local bastion_private_ip
+                bastion_private_ip=$(echo "$cluster" | jq -r '.bastion_server.private_ip_address // "N/A"')
+                servers="BASTION|$bastion_hostname|$bastion_status|$bastion_ip|$bastion_private_ip"
+            fi
+            
+            # Add node pool servers
+            local node_servers
+            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")"' 2>/dev/null || true)
+            
+            if [[ -n "$node_servers" ]]; then
+                if [[ -n "$servers" ]]; then
+                    servers="$servers"$'\n'"$node_servers"
+                else
+                    servers="$node_servers"
+                fi
+            fi
+            
+            # Mode selection loop
+            while true; do
+                clear
+                local mode
+                local menu_options=()
+                
+                # Only add SSH/kubectl/kubeconfig options if bastion exists
+                if [[ -n "$bastion_ip" ]] && [[ -n "$servers" ]]; then
+                    menu_options+=("🔗 SSH to servers" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
+                fi
+                
+                # Add cluster action options (cluster exists in AutoGlue)
+                menu_options+=("⚡ Cluster Actions")
+                
+                # Add clone option if there's a matched repo
+                if [[ -n "$matched_repo" ]]; then
+                    menu_options+=("📦 Clone GitHub Repo ($matched_repo)")
+                fi
+                
+                menu_options+=("◀ Back")
+                
+                # Format cluster status with appropriate emoji and color
+                local status_display
+                case "$cluster_status" in
+                    ready)
+                        status_display=$(gum style --foreground 82 "✓ $cluster_status")
+                        ;;
+                    provisioning|pending)
+                        status_display=$(gum style --foreground 208 "⏳ $cluster_status")
+                        ;;
+                    failed)
+                        status_display=$(gum style --foreground 196 "✗ $cluster_status")
+                        ;;
+                    *)
+                        status_display="$cluster_status"
+                        ;;
+                esac
+                
+                mode=$(gum choose --header="Cluster: $cluster_selection ($status_display) - What would you like to do?" "${menu_options[@]}" || true)
+                
+                # Handle escape or empty selection
+                if [[ -z "$mode" ]]; then
+                    break
+                fi
+                
+                case "$mode" in
+                    "🔗 SSH to servers")
+                        ssh_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        ;;
+                    "📡 Port forward to master (6443)")
+                        kubectl_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        ;;
+                    "⚙️ Setup ~/.kube/config")
+                        kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        ;;
+                    "⚡ Cluster Actions")
+                        cluster_actions_mode "$cluster_id" "$org_id"
+                        ;;
+                    📦*)
+                        clone_repo_mode "$matched_repo" "development-captains"
+                        ;;
+                    "◀ Back")
+                        break
+                        ;;
+                esac
+            done
+        done
+    done
+}
+
+# Load SSH keys to agent (called on demand)
+load_ssh_keys() {
+    local org_id="$1"
+    local ssh_key_ids="$2"  # space-separated list of key IDs
     
-    if [[ -z "$bastion_ip" ]]; then
-        gum style --foreground 196 "No bastion server found for this cluster"
-        return
+    if [[ -z "$ssh_key_ids" ]]; then
+        return 0
     fi
     
-    # Load bastion SSH key to agent
-    local bastion_key_id
-    bastion_key_id=$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')
+    # Check if ssh-agent is running (exit code 2 = not running, 0/1 = running)
+    local agent_status=0
+    ssh-add -l >/dev/null 2>&1 || agent_status=$?
+    if [[ $agent_status -eq 2 ]]; then
+        eval $(ssh-agent) > /dev/null
+    fi
     
-    if [[ -n "$bastion_key_id" ]]; then
-        # Check if ssh-agent is running (exit code 2 = not running, 0/1 = running)
-        local agent_status=0
-        ssh-add -l >/dev/null 2>&1 || agent_status=$?
-        if [[ $agent_status -eq 2 ]]; then
-            gum style --foreground 208 "⚠ ssh-agent not running. Starting..."
-            eval $(ssh-agent) > /dev/null
-            gum style --foreground 82 "✓ ssh-agent started"
-            sleep 1
-        fi
-        
-        gum spin --spinner dot --title "Loading bastion SSH key..." -- sleep 0.5
+    # Load each unique SSH key
+    local loaded=0
+    local failed=0
+    for key_id in $ssh_key_ids; do
         local key_data
-        key_data=$(api_call GET "/ssh/$bastion_key_id?reveal=true" "$org_id")
+        key_data=$(api_call GET "/ssh/$key_id?reveal=true" "$org_id" 2>/dev/null)
         local private_key
-        private_key=$(echo "$key_data" | jq -r '.private_key')
+        private_key=$(echo "$key_data" | jq -r '.private_key' 2>/dev/null)
         
         # Add to ssh-agent
-        if echo "$private_key" | ssh-add - 2>&1 | grep -q "Identity added"; then
-            gum style --foreground 82 "✓ Bastion key loaded to ssh-agent"
-            sleep 1
-        else
-            gum style --foreground 208 "⚠ Warning: Could not add key to ssh-agent (continuing anyway)"
-            sleep 2
-        fi
-    fi
-    
-    # List servers from all node pools AND include bastion
-    local servers=""
-    
-    # Add bastion server first
-    local bastion_hostname
-    bastion_hostname=$(echo "$cluster" | jq -r '.bastion_server.hostname // empty')
-    if [[ -n "$bastion_hostname" ]]; then
-        local bastion_status
-        bastion_status=$(echo "$cluster" | jq -r '.bastion_server.status // "ready"')
-        servers="BASTION|$bastion_hostname|$bastion_status|$bastion_ip"
-    fi
-    
-    # Add node pool servers
-    local node_servers
-    node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address)"' 2>/dev/null || true)
-    
-    if [[ -n "$node_servers" ]]; then
-        if [[ -n "$servers" ]]; then
-            servers="$servers"$'\n'"$node_servers"
-        else
-            servers="$node_servers"
-        fi
-    fi
-    
-    if [[ -z "$servers" ]]; then
-        gum style --foreground 196 "No servers found"
-        sleep 2
-        continue
-    fi
-    
-    # Mode selection loop
-    while true; do
-        local mode
-        mode=$(gum choose --header="What would you like to do?" \
-            "🔗 SSH to servers" \
-            "📡 Port forward to master (6443)" \
-            "⚙️ Setup ~/.kube/config" \
-            "◀ Back")
-        
-        # Handle escape or empty selection
-        if [[ -z "$mode" ]]; then
-            break
-        fi
-        
-        case "$mode" in
-            "🔗 SSH to servers")
-                ssh_mode "$cluster_id" "$bastion_ip" "$servers"
-                ;;
-            "📡 Port forward to master (6443)")
-                kubectl_mode "$cluster_id" "$bastion_ip" "$servers"
-                ;;
-            "⚙️ Setup ~/.kube/config")
-                kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers"
-                ;;
-            "◀ Back")
-                break
-                ;;
-        esac
-    done
-        done
+        echo "$private_key" | ssh-add - >/dev/null 2>&1
     done
 }
 
@@ -378,38 +443,62 @@ ssh_mode() {
     local cluster_id="$1"
     local bastion_ip="$2"
     local servers="$3"
+    local org_id="$4"
+    local ssh_key_ids="$5"
+    
+    local key_loaded=false
     
     # Server selection loop
     while true; do
-        # Format for display
-        local server_list
-        server_list=$(echo "$servers" | awk -F'|' '{printf "[%s] %s (%s)\n", $1, $2, $3}')
+        clear
+        # Build formatted server list
+        local server_list=""
+        while IFS='|' read -r role hostname status public_ip private_ip; do
+            local pub_display="${public_ip}"
+            local priv_display="${private_ip}"
+            [[ "$public_ip" == "N/A" ]] && pub_display="N/A"
+            [[ "$private_ip" == "N/A" ]] && priv_display="N/A"
+            server_list+="[${role}] ${hostname} - Public: ${pub_display}, Private: ${priv_display}"$'\n'
+        done <<< "$servers"
         
         local server_selection
-        server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select server:")
+        server_selection=$(echo -e "${server_list}◀ Back" | gum choose --header="Select server to SSH into:" || true)
         
-        # Handle escape or empty selection
-        if [[ -z "$server_selection" ]]; then
+        # Handle ESC or Back
+        if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
             return
         fi
         
-        [[ "$server_selection" == "◀ Back" ]] && return
-        [[ -z "$server_selection" ]] && continue
-        
-        # Extract hostname
+        # Extract hostname (second word after [ROLE])
         local hostname
-        hostname=$(echo "$server_selection" | sed -n 's/.*] \([^ ]*\).*/\1/p')
+        hostname=$(echo "$server_selection" | awk '{print $2}')
         
-        # Extract role
+        # Get the full server line to extract role and IPs
+        local server_line
+        server_line=$(echo "$servers" | grep -F "|$hostname|")
+        
         local role
-        role=$(echo "$server_selection" | sed -n 's/\[\([^]]*\)\].*/\1/p')
+        role=$(echo "$server_line" | cut -d'|' -f1)
+        local private_ip
+        private_ip=$(echo "$server_line" | cut -d'|' -f5)
+        local public_ip
+        public_ip=$(echo "$server_line" | cut -d'|' -f4)
         
-        # Get the private IP for this server
         local target_ip
-        target_ip=$(echo "$servers" | grep "|$hostname|" | cut -d'|' -f4)
+        if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
+            target_ip="$private_ip"
+        else
+            target_ip="$public_ip"
+        fi
+        
+        # Load SSH key on first connection
+        if [[ "$key_loaded" == "false" ]]; then
+            load_ssh_keys "$org_id" "$ssh_key_ids"
+            key_loaded=true
+        fi
         
         # Connect directly - after exit, returns to server list
-        connect_ssh "$bastion_ip" "$cluster_id" "$hostname" "$role" "$target_ip"
+        connect_ssh "$bastion_ip" "$cluster_id" "$hostname" "$role" "$target_ip" || true
     done
 }
 
@@ -418,14 +507,17 @@ kubectl_mode() {
     local cluster_id="$1"
     local bastion_ip="$2"
     local servers="$3"
+    local org_id="$4"
+    local ssh_key_ids="$5"
+    
+    local key_loaded=false
     
     # Filter to only master nodes
     local master_servers
     master_servers=$(echo "$servers" | grep "^MASTER|")
     
     if [[ -z "$master_servers" ]]; then
-        gum style --foreground 196 "No master nodes found"
-        sleep 2
+        echo "No master nodes found"
         return
     fi
     
@@ -436,26 +528,40 @@ kubectl_mode() {
         server_list=$(echo "$master_servers" | awk -F'|' '{printf "[%s] %s (%s)\n", $1, $2, $3}')
         
         local server_selection
-        server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master node for kubectl:")
+        server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master node for kubectl:" || true)
         
-        # Handle escape or empty selection
-        if [[ -z "$server_selection" ]]; then
+        # Handle ESC or Back
+        if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
             return
         fi
-        
-        [[ "$server_selection" == "◀ Back" ]] && return
-        [[ -z "$server_selection" ]] && continue
         
         # Extract hostname
         local hostname
         hostname=$(echo "$server_selection" | sed -n 's/.*] \([^ ]*\).*/\1/p')
         
-        # Get the private IP for this server
+        # Get the IP for this server - prefer private, fallback to public
+        local server_line
+        server_line=$(echo "$master_servers" | grep "|$hostname|")
+        local private_ip
+        private_ip=$(echo "$server_line" | cut -d'|' -f5)
+        local public_ip
+        public_ip=$(echo "$server_line" | cut -d'|' -f4)
+        
         local target_ip
-        target_ip=$(echo "$master_servers" | grep "|$hostname|" | cut -d'|' -f4)
+        if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
+            target_ip="$private_ip"
+        else
+            target_ip="$public_ip"
+        fi
+        
+        # Load SSH key on first port forward
+        if [[ "$key_loaded" == "false" ]]; then
+            load_ssh_keys "$org_id" "$ssh_key_ids"
+            key_loaded=true
+        fi
         
         # Port forward directly - after Ctrl+C, returns to master list
-        port_forward "$bastion_ip" "$cluster_id" "$hostname" "$target_ip"
+        port_forward "$bastion_ip" "$cluster_id" "$hostname" "$target_ip" || true
     done
 }
 
@@ -464,30 +570,24 @@ kubeconfig_mode() {
     local cluster_id="$1"
     local bastion_ip="$2"
     local servers="$3"
+    local org_id="$4"
+    local ssh_key_ids="$5"
     
     # Filter to only master nodes
     local master_servers
     master_servers=$(echo "$servers" | grep "^MASTER|")
     
     if [[ -z "$master_servers" ]]; then
-        gum style --foreground 196 "No master nodes found"
-        sleep 2
+        echo "No master nodes found"
         return
     fi
-    
-    gum style --border rounded --padding "1 2" \
-        "Setup ~/.kube/config" \
-        "" \
-        "This will copy /etc/kubernetes/admin.conf from a master node"
-    
-    echo ""
     
     # Format for display
     local server_list
     server_list=$(echo "$master_servers" | awk -F'|' '{printf "[%s] %s (%s)\n", $1, $2, $3}')
     
     local server_selection
-    server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master node to get kubeconfig from:")
+    server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master node to get kubeconfig from:" || true)
     
     # Handle escape or empty selection
     if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
@@ -498,36 +598,461 @@ kubeconfig_mode() {
     local hostname
     hostname=$(echo "$server_selection" | sed -n 's/.*] \([^ ]*\).*/\1/p')
     
+    # Get the IP for this server - prefer private, fallback to public
+    local server_line
+    server_line=$(echo "$master_servers" | grep "|$hostname|")
+    local private_ip
+    private_ip=$(echo "$server_line" | cut -d'|' -f5)
+    local public_ip
+    public_ip=$(echo "$server_line" | cut -d'|' -f4)
+    
+    local target_ip
+    if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
+        target_ip="$private_ip"
+    else
+        target_ip="$public_ip"
+    fi
+    
     # Create ~/.kube directory if it doesn't exist
     mkdir -p ~/.kube
     
-    gum spin --spinner dot --title "Copying admin.conf from $hostname..." -- sleep 0.5
+    # Load SSH keys before copying
+    load_ssh_keys "$org_id" "$ssh_key_ids"
     
-    # Copy the file through bastion using double-hop SCP
-    # First copy from master to bastion, then from bastion to local
-    if ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -F ~/.ssh/autoglue/cluster-$cluster_id.config $hostname \
-        'sudo cat /etc/kubernetes/admin.conf'" > ~/.kube/config 2>/dev/null; then
-        
-        gum style --foreground 82 "✓ Kubeconfig copied to ~/.kube/config"
-        sleep 1
-        
+    echo "Fetching kubeconfig from $hostname..."
+    
+    # Copy the file through bastion using double-hop SCP with agent forwarding and private IP
+    if ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip \
+        'sudo cat /etc/kubernetes/admin.conf'" > ~/.kube/config 2>&1; then
         # Update the server URL to localhost:6443
-        gum spin --spinner dot --title "Updating server URL..." -- sleep 0.5
-        
         if kubectl config set-cluster "kubernetes" --server=https://127.0.0.1:6443 >/dev/null 2>&1; then
-            gum style --foreground 82 "✓ Server URL updated to https://127.0.0.1:6443"
-            gum style --foreground 208 "
-⚠ Remember to port forward to a master node before using kubectl!"
-            sleep 3
+            echo "✓ Kubeconfig saved to ~/.kube/config"
+            echo "✓ Server URL updated to https://127.0.0.1:6443"
         else
-            gum style --foreground 208 "⚠ Warning: Could not update server URL. You may need to do it manually."
-            sleep 2
+            echo "✓ Kubeconfig saved to ~/.kube/config"
+            echo "⚠️  Could not update server URL (kubectl not found?)"
         fi
     else
-        gum style --foreground 196 "✗ Failed to copy kubeconfig"
-        sleep 2
+        echo "✗ Failed to fetch kubeconfig"
     fi
+    
+    echo ""
+    read -n 1 -s -r -p "Press any key to continue..." || true
+    echo ""
+}
+
+# Helper function to format ISO8601 timestamp to readable format
+format_timestamp() {
+    local timestamp="$1"
+    
+    if [[ -z "$timestamp" ]] || [[ "$timestamp" == "N/A" ]] || [[ "$timestamp" == "null" ]]; then
+        echo "N/A"
+        return
+    fi
+    
+    # Convert ISO8601 to readable format: "2026-01-11 09:44 UTC"
+    date -u -d "$timestamp" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "$timestamp"
+}
+
+# Helper function to calculate relative time
+relative_time() {
+    local timestamp="$1"
+    
+    if [[ -z "$timestamp" ]] || [[ "$timestamp" == "N/A" ]] || [[ "$timestamp" == "null" ]]; then
+        echo "N/A"
+        return
+    fi
+    
+    local now=$(date +%s)
+    local then=$(date -d "$timestamp" +%s 2>/dev/null || echo "0")
+    
+    if [[ "$then" == "0" ]]; then
+        echo "unknown"
+        return
+    fi
+    
+    local diff=$((now - then))
+    
+    if [[ $diff -lt 0 ]]; then
+        diff=$((diff * -1))
+    fi
+    
+    if [[ $diff -lt 60 ]]; then
+        echo "${diff}s ago"
+    elif [[ $diff -lt 3600 ]]; then
+        local minutes=$((diff / 60))
+        echo "${minutes}m ago"
+    elif [[ $diff -lt 86400 ]]; then
+        local hours=$((diff / 3600))
+        echo "${hours}h ago"
+    else
+        local days=$((diff / 86400))
+        echo "${days}d ago"
+    fi
+}
+
+# Cluster actions mode - submenu for trigger and view
+cluster_actions_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    while true; do
+        clear
+        local action_choice
+        action_choice=$(gum choose --header="Cluster Actions - What would you like to do?" \
+            "🚀 Trigger" \
+            "📊 View" \
+            "◀ Back" || true)
+        
+        case "$action_choice" in
+            "🚀 Trigger")
+                run_actions_mode "$cluster_id" "$org_id"
+                ;;
+            "📊 View")
+                view_runs_mode "$cluster_id" "$org_id"
+                ;;
+            "◀ Back"|"")
+                return
+                ;;
+        esac
+    done
+}
+
+# Run actions mode - list available actions and trigger cluster runs
+run_actions_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    # Action selection loop
+    while true; do
+        clear
+        echo "Fetching available actions..."
+        
+        # Fetch actions from API
+        local actions
+        actions=$(api_call GET "/admin/actions" "$org_id" 2>/dev/null)
+        
+        # Check if actions were fetched successfully
+        if [[ -z "$actions" ]] || [[ "$actions" == "null" ]]; then
+            gum style --foreground 196 "✗ Failed to fetch actions or no actions available"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Check if actions array is empty
+        local action_count
+        action_count=$(echo "$actions" | jq 'length' 2>/dev/null)
+        if [[ "$action_count" == "0" ]]; then
+            gum style --foreground 208 "No actions available"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Build action list with format: [label] description|action_id
+        local action_list
+        action_list=$(echo "$actions" | jq -r '.[] | "[\(.label)] \(.description // "No description")|\(.id)"')
+        
+        if [[ -z "$action_list" ]]; then
+            gum style --foreground 196 "✗ No actions found"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Show action selection menu
+        local action_display
+        action_display=$(echo "$action_list" | cut -d'|' -f1)
+        
+        local action_selection
+        action_selection=$(echo -e "$action_display\n◀ Back" | gum choose --header="Select action to run:" || true)
+        
+        # Handle ESC or Back
+        if [[ -z "$action_selection" ]] || [[ "$action_selection" == "◀ Back" ]]; then
+            return
+        fi
+        
+        # Extract action ID
+        local action_id
+        action_id=$(echo "$action_list" | grep -F "$action_selection" | cut -d'|' -f2)
+        
+        # Confirm action execution
+        if ! gum confirm "Run action: $action_selection?"; then
+            continue
+        fi
+        
+        echo ""
+        echo "Triggering cluster run..."
+        
+        # Trigger cluster run
+        local run_response
+        run_response=$(curl -s -X POST \
+            -H "X-API-KEY: $API_KEY" \
+            -H "X-Org-ID: $org_id" \
+            "$API_ENDPOINT/clusters/$cluster_id/actions/$action_id/runs" 2>/dev/null)
+        
+        # Check if run was created successfully
+        local run_id
+        run_id=$(echo "$run_response" | jq -r '.id // empty' 2>/dev/null)
+        
+        if [[ -n "$run_id" ]]; then
+            local run_status
+            run_status=$(echo "$run_response" | jq -r '.status // "unknown"')
+            gum style --foreground 82 "✓ Cluster run created successfully"
+            echo "Run ID: $run_id"
+            echo "Status: $run_status"
+        else
+            local error_msg
+            error_msg=$(echo "$run_response" | jq -r '.message // "Unknown error"' 2>/dev/null)
+            gum style --foreground 196 "✗ Failed to create cluster run"
+            echo "Error: $error_msg"
+        fi
+        
+        echo ""
+        read -n 1 -s -r -p "Press any key to continue..." || true
+        echo ""
+    done
+}
+
+# View runs mode - show cluster runs with status tracking
+view_runs_mode() {
+    local cluster_id="$1"
+    local org_id="$2"
+    
+    # Run selection loop
+    while true; do
+        clear
+        echo "Fetching cluster runs..."
+        
+        # Fetch cluster runs
+        local runs
+        runs=$(api_call GET "/clusters/$cluster_id/runs" "$org_id" 2>/dev/null)
+        
+        # Check if runs were fetched successfully
+        if [[ -z "$runs" ]] || [[ "$runs" == "null" ]]; then
+            gum style --foreground 196 "✗ Failed to fetch cluster runs"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Check if runs array is empty
+        local run_count
+        run_count=$(echo "$runs" | jq 'length' 2>/dev/null)
+        if [[ "$run_count" == "0" ]]; then
+            gum style --foreground 208 "No cluster runs found"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
+        
+        # Build run list with color-coded status
+        local run_list=""
+        while IFS='|' read -r run_id action status created_at; do
+            local status_icon
+            case "$status" in
+                succeeded)
+                    status_icon="✓"
+                    ;;
+                running|queued)
+                    status_icon="⏳"
+                    ;;
+                failed)
+                    status_icon="✗"
+                    ;;
+                *)
+                    status_icon="•"
+                    ;;
+            esac
+            local formatted_time=$(format_timestamp "$created_at")
+            local relative=$(relative_time "$created_at")
+            run_list+="[$status_icon $status] $action - $formatted_time ($relative)|$run_id"$'\n'
+        done < <(echo "$runs" | jq -r '.[] | "\(.id)|\(.action)|\(.status)|\(.created_at)"' | awk -F'|' '{print $1 "|" $2 "|" $3 "|" $4}')
+        
+        # Add Refresh option
+        local run_display
+        run_display=$(echo "$run_list" | cut -d'|' -f1)
+        
+        local run_selection
+        run_selection=$(echo -e "$run_display\n🔄 Refresh\n◀ Back" | gum choose --header="Select run to view details:" || true)
+        
+        # Handle ESC or Back
+        if [[ -z "$run_selection" ]] || [[ "$run_selection" == "◀ Back" ]]; then
+            return
+        fi
+        
+        # Handle Refresh
+        if [[ "$run_selection" == "🔄 Refresh" ]]; then
+            continue
+        fi
+        
+        # Extract run ID
+        local selected_run_id
+        selected_run_id=$(echo "$run_list" | grep -F "$run_selection" | cut -d'|' -f2)
+        
+        # Detail view loop with auto-refresh for active runs
+        while true; do
+            # Fetch detailed run info
+            clear
+            echo "Fetching run details..."
+            
+            local run_detail
+            run_detail=$(api_call GET "/clusters/$cluster_id/runs/$selected_run_id" "$org_id" 2>/dev/null)
+            
+            if [[ -n "$run_detail" ]] && [[ "$run_detail" != "null" ]]; then
+                clear
+                gum style --border rounded --padding "1 2" "Cluster Run Details"
+                echo ""
+                
+                local detail_id detail_action detail_status detail_error detail_created detail_updated detail_finished
+                detail_id=$(echo "$run_detail" | jq -r '.id // "N/A"')
+                detail_action=$(echo "$run_detail" | jq -r '.action // "N/A"')
+                detail_status=$(echo "$run_detail" | jq -r '.status // "N/A"')
+                detail_error=$(echo "$run_detail" | jq -r '.error // "None"')
+                detail_created=$(echo "$run_detail" | jq -r '.created_at // "N/A"')
+                detail_updated=$(echo "$run_detail" | jq -r '.updated_at // "N/A"')
+                detail_finished=$(echo "$run_detail" | jq -r '.finished_at // "N/A"')
+                
+                # Format timestamps
+                local formatted_created=$(format_timestamp "$detail_created")
+                local relative_created=$(relative_time "$detail_created")
+                local formatted_updated=$(format_timestamp "$detail_updated")
+                local relative_updated=$(relative_time "$detail_updated")
+                local formatted_finished=$(format_timestamp "$detail_finished")
+                local relative_finished=$(relative_time "$detail_finished")
+                
+                echo "ID: $detail_id"
+                echo "Action: $detail_action"
+                
+                # Color-code status
+                case "$detail_status" in
+                    succeeded)
+                        echo -n "Status: "
+                        gum style --foreground 82 "✓ $detail_status"
+                        ;;
+                    running|queued)
+                        echo -n "Status: "
+                        gum style --foreground 208 "⏳ $detail_status"
+                        ;;
+                    failed)
+                        echo -n "Status: "
+                        gum style --foreground 196 "✗ $detail_status"
+                        ;;
+                    *)
+                        echo "Status: $detail_status"
+                        ;;
+                esac
+                
+                echo "Created: $formatted_created ($relative_created)"
+                echo "Updated: $formatted_updated ($relative_updated)"
+                echo "Finished: $formatted_finished ($relative_finished)"
+                
+                if [[ -n "$detail_error" ]] && [[ "$detail_error" != "None" ]] && [[ "$detail_error" != "null" ]]; then
+                    echo ""
+                    gum style --foreground 196 "Error:"
+                    echo "$detail_error"
+                fi
+                
+                # Auto-refresh for active runs
+                if [[ "$detail_status" == "running" ]] || [[ "$detail_status" == "queued" ]]; then
+                    echo ""
+                    echo "(Auto-refreshing in 3s... Press any key to return to list)"
+                    if read -t 3 -n 1 -s -r 2>/dev/null; then
+                        break
+                    fi
+                    # Continue loop to refresh
+                else
+                    # Run completed, wait for user input
+                    echo ""
+                    read -n 1 -s -r -p "Press any key to continue..." || true
+                    echo ""
+                    break
+                fi
+            else
+                gum style --foreground 196 "✗ Failed to fetch run details"
+                echo ""
+                read -n 1 -s -r -p "Press any key to continue..." || true
+                echo ""
+                break
+            fi
+        done
+    done
+}
+
+# Clone GitHub repo mode
+clone_repo_mode() {
+    local repo_name="$1"
+    local org="$2"
+    
+    if [[ -z "$repo_name" ]]; then
+        return
+    fi
+    
+    # Check if directory already exists
+    if [[ -d "$repo_name" ]]; then
+        if [[ -d "$repo_name/.git" ]]; then
+            echo "Checking repository status..."
+            
+            # Fetch latest from origin
+            (cd "$repo_name" && git fetch origin 2>&1 | grep -v "^From" || true)
+            
+            # Get status
+            local status
+            status=$(cd "$repo_name" && git status --porcelain --branch)
+            
+            # Check for various conditions
+            local has_uncommitted=false
+            local has_unpushed=false
+            local has_unpulled=false
+            
+            # Check for uncommitted changes (any line not starting with ##)
+            if echo "$status" | grep -q "^[^#]"; then
+                has_uncommitted=true
+            fi
+            
+            # Check branch status line for ahead/behind
+            local branch_line
+            branch_line=$(echo "$status" | grep "^##" || true)
+            
+            if echo "$branch_line" | grep -q "\[ahead [0-9]\+\]"; then
+                has_unpushed=true
+            fi
+            
+            if echo "$branch_line" | grep -q "\[behind [0-9]\+\]"; then
+                has_unpulled=true
+            fi
+            
+            # Display warnings or success
+            if [[ "$has_uncommitted" == "true" ]] || [[ "$has_unpushed" == "true" ]] || [[ "$has_unpulled" == "true" ]]; then
+                echo ""
+                [[ "$has_uncommitted" == "true" ]] && echo "⚠️  Repository has uncommitted changes"
+                [[ "$has_unpushed" == "true" ]] && echo "⚠️  Repository has unpushed commits"
+                [[ "$has_unpulled" == "true" ]] && echo "⚠️  Repository has unpulled commits from origin"
+                echo ""
+            else
+                echo "✓ Repository is up to date"
+            fi
+            
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+        else
+            echo "Directory '$repo_name' already exists (not a git repository)"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+        fi
+        return
+    fi
+    
+    gh repo clone "$org/$repo_name" "$repo_name" 2>&1
 }
 
 # SSH Functions
@@ -540,21 +1065,12 @@ connect_ssh() {
     
     # Check if this IS the bastion
     if [[ "$role" == "BASTION" ]]; then
-        gum style --border rounded --padding "1 2" \
-            "Connecting to bastion: $hostname"
-        
-        echo ""
-        
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null cluster@"$bastion_ip"
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@"$bastion_ip"
     else
-        gum style --border rounded --padding "1 2" \
-            "Connecting to $hostname via $bastion_ip"
         
-        echo ""
-        
-        # Use SSH config file on bastion
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -t cluster@"$bastion_ip" \
-            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -F ~/.ssh/autoglue/cluster-$cluster_id.config $hostname"
+        # Use agent forwarding with private IP address
+        ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
+            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip"
     fi
 }
 
@@ -566,18 +1082,15 @@ port_forward() {
     
     local port="6443"
     
-    gum style --border rounded --padding "1 2" \
-        "Port forwarding localhost:$port → $hostname:6443" \
-        "" \
-        "Press Ctrl+C to stop"
-    
+    echo "Starting port forward: localhost:$port -> $hostname:6443"
+    echo "Press Ctrl+C to stop forwarding"
     echo ""
     
     # Double hop: laptop->bastion->target, both with -L forwarding
-    # Use SSH config file on bastion which has the correct keys
-    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes \
+    # Use agent forwarding with private IP address
+    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
         -L "$port:localhost:$port" -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -N -L $port:localhost:6443 -F ~/.ssh/autoglue/cluster-$cluster_id.config $hostname"
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip"
 }
 
 # Main
@@ -600,10 +1113,8 @@ main() {
         profile_menu
     fi
     
-    # Browse infrastructure - auto-loop, Ctrl+C to quit
-    while true; do
-        browse_infrastructure
-    done
+    # Browse infrastructure - will loop internally until user exits
+    browse_infrastructure
 }
 
 main "$@"
