@@ -276,7 +276,7 @@ browse_infrastructure() {
                 # Cluster doesn't exist in AutoGlue, only show clone repo option
                 if [[ -n "$matched_repo" ]]; then
                     local mode
-                    mode=$(gum choose --header="What would you like to do?" "📦 Clone GitHub Repo ($matched_repo)" "◀ Back" || true)
+                    mode=$(gum choose --header="What would you like to do?" "📦 Clone Captain Repository ($matched_repo)" "◀ Back" || true)
                     
                     case "$mode" in
                         📦*)
@@ -354,7 +354,7 @@ browse_infrastructure() {
                 
                 # Add clone option if there's a matched repo
                 if [[ -n "$matched_repo" ]]; then
-                    menu_options+=("📦 Clone GitHub Repo ($matched_repo)")
+                    menu_options+=("📦 Clone Captain Repository ($matched_repo)")
                 fi
                 
                 menu_options+=("◀ Back")
@@ -511,6 +511,8 @@ kubectl_mode() {
     local ssh_key_ids="$5"
     
     local key_loaded=false
+    local port_forward_pid=""
+    local port_forward_master=""
     
     # Filter to only master nodes
     local master_servers
@@ -523,16 +525,54 @@ kubectl_mode() {
     
     # Master selection loop
     while true; do
-        # Format for display
+        clear
+        
+        # Check if port forward is still running
+        if [[ -n "$port_forward_pid" ]] && ! kill -0 "$port_forward_pid" 2>/dev/null; then
+            port_forward_pid=""
+            port_forward_master=""
+        fi
+        
+        # Show status
+        if [[ -n "$port_forward_pid" ]]; then
+            gum style --foreground 82 "✓ Port forward active: localhost:6443 -> $port_forward_master:6443 (PID: $port_forward_pid)"
+            echo ""
+        fi
+        
+        # Format master list for display
         local server_list
         server_list=$(echo "$master_servers" | awk -F'|' '{printf "[%s] %s (%s)\n", $1, $2, $3}')
         
+        # Build menu options
+        local menu_items
+        if [[ -n "$port_forward_pid" ]]; then
+            menu_items=$(echo -e "$server_list\n🛑 Stop Port Forward\n◀ Back")
+        else
+            menu_items=$(echo -e "$server_list\n◀ Back")
+        fi
+        
         local server_selection
-        server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master node for kubectl:" || true)
+        server_selection=$(echo "$menu_items" | gum choose --header="Select master node for kubectl port forward:" || true)
         
         # Handle ESC or Back
         if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
+            # Clean up port forward if running
+            if [[ -n "$port_forward_pid" ]]; then
+                kill "$port_forward_pid" 2>/dev/null || true
+            fi
             return
+        fi
+        
+        # Handle stop port forward
+        if [[ "$server_selection" == "🛑 Stop Port Forward" ]]; then
+            if [[ -n "$port_forward_pid" ]]; then
+                kill "$port_forward_pid" 2>/dev/null || true
+                port_forward_pid=""
+                port_forward_master=""
+                gum style --foreground 82 "✓ Port forward stopped"
+                sleep 1
+            fi
+            continue
         fi
         
         # Extract hostname
@@ -560,8 +600,86 @@ kubectl_mode() {
             key_loaded=true
         fi
         
-        # Port forward directly - after Ctrl+C, returns to master list
-        port_forward "$bastion_ip" "$cluster_id" "$hostname" "$target_ip" || true
+        # Stop existing port forward if running
+        if [[ -n "$port_forward_pid" ]]; then
+            kill "$port_forward_pid" 2>/dev/null || true
+            port_forward_pid=""
+            port_forward_master=""
+        fi
+        
+        # Check if port 6443 is already in use
+        if lsof -ti :6443 >/dev/null 2>&1; then
+            gum style --foreground 196 "✗ Port 6443 is already in use"
+            echo ""
+            echo "Kill the existing process? (This will stop any existing port forward)"
+            if gum confirm "Kill process on port 6443?"; then
+                lsof -ti :6443 | xargs kill -9 2>/dev/null || true
+                sleep 2
+                
+                # Verify port is now free
+                if lsof -ti :6443 >/dev/null 2>&1; then
+                    gum style --foreground 196 "✗ Failed to kill process on port 6443"
+                    echo ""
+                    read -n 1 -s -r -p "Press any key to continue..." || true
+                    continue
+                fi
+            else
+                continue
+            fi
+        fi
+        
+        # Start port forward in background
+        echo "Starting port forward: localhost:6443 -> $hostname:6443"
+        
+        # Create a temporary error log
+        local error_log=$(mktemp)
+        
+        # Start port forward with error output captured - using proper backgrounding
+        (ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
+            -L "6443:localhost:6443" -t cluster@"$bastion_ip" \
+            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" \
+            2>"$error_log") &
+        
+        local ssh_pid=$!
+        port_forward_master="$hostname"
+        
+        # Wait and check if it started successfully
+        sleep 3
+        
+        # Find the actual port forward process (not the parent shell)
+        local actual_pid=$(lsof -ti :6443 2>/dev/null || echo "")
+        
+        if [[ -n "$actual_pid" ]] && kill -0 "$ssh_pid" 2>/dev/null; then
+            port_forward_pid="$ssh_pid"
+            gum style --foreground 82 "✓ Port forward started successfully (PID: $ssh_pid)"
+            rm -f "$error_log"
+        else
+            gum style --foreground 196 "✗ Port forward failed to start"
+            
+            # Try to read error log
+            if [[ -s "$error_log" ]]; then
+                echo ""
+                echo "Error details:"
+                cat "$error_log"
+            else
+                echo ""
+                echo "No error details available. Possible reasons:"
+                echo "  - SSH keys not loaded (try SSH to a server first)"
+                echo "  - Master node not accessible"
+                echo "  - Network connectivity issue"
+            fi
+            
+            rm -f "$error_log"
+            
+            # Clean up the failed SSH process
+            kill "$ssh_pid" 2>/dev/null || true
+            
+            port_forward_pid=""
+            port_forward_master=""
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+        fi
+        sleep 1
     done
 }
 
@@ -986,7 +1104,7 @@ view_runs_mode() {
     done
 }
 
-# Clone GitHub repo mode
+# Clone Captain Repository mode
 clone_repo_mode() {
     local repo_name="$1"
     local org="$2"
@@ -995,8 +1113,12 @@ clone_repo_mode() {
         return
     fi
     
+    local repo_exists=false
+    local clone_success=false
+    
     # Check if directory already exists
     if [[ -d "$repo_name" ]]; then
+        repo_exists=true
         if [[ -d "$repo_name/.git" ]]; then
             echo "Checking repository status..."
             
@@ -1040,19 +1162,45 @@ clone_repo_mode() {
                 echo "✓ Repository is up to date"
             fi
             
-            echo ""
-            read -n 1 -s -r -p "Press any key to continue..." || true
-            echo ""
+            clone_success=true
         else
             echo "Directory '$repo_name' already exists (not a git repository)"
             echo ""
             read -n 1 -s -r -p "Press any key to continue..." || true
             echo ""
+            return
         fi
-        return
+    else
+        # Clone the repository
+        if gh repo clone "$org/$repo_name" "$repo_name" 2>&1; then
+            clone_success=true
+            echo ""
+            gum style --foreground 82 "✓ Repository cloned successfully"
+        else
+            echo ""
+            gum style --foreground 196 "✗ Failed to clone repository"
+            echo ""
+            read -n 1 -s -r -p "Press any key to continue..." || true
+            echo ""
+            return
+        fi
     fi
     
-    gh repo clone "$org/$repo_name" "$repo_name" 2>&1
+    # Offer to open a shell in the repository directory
+    if [[ "$clone_success" == "true" ]]; then
+        echo ""
+        local shell_choice
+        shell_choice=$(gum choose --header="What would you like to do?" \
+            "🐚 Open shell in repository" \
+            "◀ Back" || true)
+        
+        if [[ "$shell_choice" == "🐚 Open shell in repository" ]]; then
+            echo ""
+            echo "Opening shell in $repo_name/ (type 'exit' to return)"
+            echo ""
+            (cd "$repo_name" && exec $SHELL)
+        fi
+    fi
 }
 
 # SSH Functions
@@ -1091,6 +1239,21 @@ port_forward() {
     ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
         -L "$port:localhost:$port" -t cluster@"$bastion_ip" \
         "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip"
+}
+
+port_forward_background() {
+    local bastion_ip="$1"
+    local cluster_id="$2"
+    local hostname="$3"
+    local target_ip="${4:-}"
+    
+    local port="6443"
+    
+    # Double hop: laptop->bastion->target, both with -L forwarding
+    # Use agent forwarding with private IP address, run in background
+    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
+        -f -N -L "$port:localhost:$port" cluster@"$bastion_ip" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip" &
 }
 
 # Main
