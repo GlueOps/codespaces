@@ -30,6 +30,17 @@ validate_api_key() {
     echo "$response" | jq -e '.id' >/dev/null 2>&1
 }
 
+# Get GitHub org based on API endpoint
+# glueopshosted.com -> production-captains
+# Everything else (glueopshosted.rocks, custom) -> development-captains
+get_gh_org() {
+    if [[ "$API_ENDPOINT" == *"glueopshosted.com"* ]]; then
+        echo "production-captains"
+    else
+        echo "development-captains"
+    fi
+}
+
 # Profile management
 load_profiles() {
     if [[ -f "$CONFIG_FILE" ]]; then
@@ -234,7 +245,8 @@ browse_infrastructure() {
         org_id=$(echo "$org_choices" | grep "^$org_selection|" | cut -d'|' -f2)
         
         # Get all GitHub repos from the organization that match the selected org suffix
-        local gh_org="development-captains"
+        local gh_org
+        gh_org=$(get_gh_org)
         local all_repos=""
         if command -v gh &> /dev/null; then
             all_repos=$(gh repo list "$gh_org" --limit 200 --json name -q '.[].name' 2>/dev/null | grep "\\.${org_selection}$" || true)
@@ -280,7 +292,7 @@ browse_infrastructure() {
                     
                     case "$mode" in
                         📦*)
-                            clone_repo_mode "$matched_repo" "development-captains"
+                            clone_repo_mode "$matched_repo" "$(get_gh_org)"
                             ;;
                         *)
                             continue
@@ -397,7 +409,7 @@ browse_infrastructure() {
                         cluster_actions_mode "$cluster_id" "$org_id"
                         ;;
                     📦*)
-                        clone_repo_mode "$matched_repo" "development-captains"
+                        clone_repo_mode "$matched_repo" "$(get_gh_org)"
                         ;;
                     "◀ Back")
                         break
