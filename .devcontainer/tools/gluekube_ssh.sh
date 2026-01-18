@@ -320,10 +320,6 @@ browse_infrastructure() {
             local bastion_key_id
             bastion_key_id=$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')
             
-            # Collect all unique SSH key IDs from the cluster
-            local all_ssh_key_ids
-            all_ssh_key_ids=$(echo "$cluster" | jq -r '[.bastion_server.ssh_key_id, .node_pools[].servers[].ssh_key_id] | unique | .[] | select(. != null and . != "")' | tr '\n' ' ')
-            
             # List servers from all node pools AND include bastion
             local servers=""
             
@@ -335,12 +331,12 @@ browse_infrastructure() {
                 bastion_status=$(echo "$cluster" | jq -r '.bastion_server.status // "ready"')
                 local bastion_private_ip
                 bastion_private_ip=$(echo "$cluster" | jq -r '.bastion_server.private_ip_address // "N/A"')
-                servers="BASTION|$bastion_hostname|$bastion_status|$bastion_ip|$bastion_private_ip"
+                servers="BASTION|$bastion_hostname|$bastion_status|$bastion_ip|$bastion_private_ip|$bastion_key_id"
             fi
             
             # Add node pool servers
             local node_servers
-            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")"' 2>/dev/null || true)
+            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null || true)
             
             if [[ -n "$node_servers" ]]; then
                 if [[ -n "$servers" ]]; then
@@ -397,13 +393,13 @@ browse_infrastructure() {
                 
                 case "$mode" in
                     "🔗 SSH to servers")
-                        ssh_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        ssh_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
                     "📡 Port forward to master (6443)")
-                        kubectl_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        kubectl_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
                     "⚙️ Setup ~/.kube/config")
-                        kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$all_ssh_key_ids"
+                        kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
                     "⚡ Cluster Actions")
                         cluster_actions_mode "$cluster_id" "$org_id"
@@ -420,14 +416,29 @@ browse_infrastructure() {
     done
 }
 
-# Load SSH keys to agent (called on demand)
-load_ssh_keys() {
+# Load a single SSH key to agent
+load_ssh_key() {
     local org_id="$1"
-    local ssh_key_ids="$2"  # space-separated list of key IDs
+    local key_id="$2"
     
-    if [[ -z "$ssh_key_ids" ]]; then
+    if [[ -z "$key_id" ]]; then
         return 0
     fi
+    
+    local key_data
+    key_data=$(api_call GET "/ssh/$key_id?reveal=true" "$org_id" 2>/dev/null)
+    local private_key
+    private_key=$(echo "$key_data" | jq -r '.private_key' 2>/dev/null)
+    
+    # Add to ssh-agent
+    echo "$private_key" | ssh-add - >/dev/null 2>&1
+}
+
+# Load SSH keys for a connection (clears existing keys, loads bastion + target)
+load_connection_keys() {
+    local org_id="$1"
+    local bastion_key_id="$2"
+    local target_key_id="$3"
     
     # Check if ssh-agent is running (exit code 2 = not running, 0/1 = running)
     local agent_status=0
@@ -436,18 +447,14 @@ load_ssh_keys() {
         eval $(ssh-agent) > /dev/null
     fi
     
-    # Load each unique SSH key
-    local loaded=0
-    local failed=0
-    for key_id in $ssh_key_ids; do
-        local key_data
-        key_data=$(api_call GET "/ssh/$key_id?reveal=true" "$org_id" 2>/dev/null)
-        local private_key
-        private_key=$(echo "$key_data" | jq -r '.private_key' 2>/dev/null)
-        
-        # Add to ssh-agent
-        echo "$private_key" | ssh-add - >/dev/null 2>&1
-    done
+    # Clear all existing keys
+    ssh-add -D >/dev/null 2>&1 || true
+    
+    # Load bastion key
+    load_ssh_key "$org_id" "$bastion_key_id"
+    
+    # Load target key
+    load_ssh_key "$org_id" "$target_key_id"
 }
 
 # SSH mode - show all servers, connect directly when selected
@@ -456,16 +463,14 @@ ssh_mode() {
     local bastion_ip="$2"
     local servers="$3"
     local org_id="$4"
-    local ssh_key_ids="$5"
-    
-    local key_loaded=false
+    local bastion_key_id="$5"
     
     # Server selection loop
     while true; do
         clear
         # Build formatted server list
         local server_list=""
-        while IFS='|' read -r role hostname status public_ip private_ip; do
+        while IFS='|' read -r role hostname status public_ip private_ip ssh_key_id; do
             local pub_display="${public_ip}"
             local priv_display="${private_ip}"
             [[ "$public_ip" == "N/A" ]] && pub_display="N/A"
@@ -485,7 +490,7 @@ ssh_mode() {
         local hostname
         hostname=$(echo "$server_selection" | awk '{print $2}')
         
-        # Get the full server line to extract role and IPs
+        # Get the full server line to extract role, IPs, and ssh_key_id
         local server_line
         server_line=$(echo "$servers" | grep -F "|$hostname|")
         
@@ -495,6 +500,8 @@ ssh_mode() {
         private_ip=$(echo "$server_line" | cut -d'|' -f5)
         local public_ip
         public_ip=$(echo "$server_line" | cut -d'|' -f4)
+        local target_key_id
+        target_key_id=$(echo "$server_line" | cut -d'|' -f6)
         
         local target_ip
         if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
@@ -503,11 +510,8 @@ ssh_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH key on first connection
-        if [[ "$key_loaded" == "false" ]]; then
-            load_ssh_keys "$org_id" "$ssh_key_ids"
-            key_loaded=true
-        fi
+        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Connect directly - after exit, returns to server list
         connect_ssh "$bastion_ip" "$cluster_id" "$hostname" "$role" "$target_ip" || true
@@ -520,9 +524,8 @@ kubectl_mode() {
     local bastion_ip="$2"
     local servers="$3"
     local org_id="$4"
-    local ssh_key_ids="$5"
+    local bastion_key_id="$5"
     
-    local key_loaded=false
     local port_forward_pid=""
     local port_forward_master=""
     
@@ -598,6 +601,8 @@ kubectl_mode() {
         private_ip=$(echo "$server_line" | cut -d'|' -f5)
         local public_ip
         public_ip=$(echo "$server_line" | cut -d'|' -f4)
+        local target_key_id
+        target_key_id=$(echo "$server_line" | cut -d'|' -f6)
         
         local target_ip
         if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
@@ -606,11 +611,8 @@ kubectl_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH key on first port forward
-        if [[ "$key_loaded" == "false" ]]; then
-            load_ssh_keys "$org_id" "$ssh_key_ids"
-            key_loaded=true
-        fi
+        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Stop existing port forward if running
         if [[ -n "$port_forward_pid" ]]; then
@@ -701,7 +703,7 @@ kubeconfig_mode() {
     local bastion_ip="$2"
     local servers="$3"
     local org_id="$4"
-    local ssh_key_ids="$5"
+    local bastion_key_id="$5"
     
     # Filter to only master nodes
     local master_servers
@@ -735,6 +737,8 @@ kubeconfig_mode() {
     private_ip=$(echo "$server_line" | cut -d'|' -f5)
     local public_ip
     public_ip=$(echo "$server_line" | cut -d'|' -f4)
+    local target_key_id
+    target_key_id=$(echo "$server_line" | cut -d'|' -f6)
     
     local target_ip
     if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
@@ -746,8 +750,8 @@ kubeconfig_mode() {
     # Create ~/.kube directory if it doesn't exist
     mkdir -p ~/.kube
     
-    # Load SSH keys before copying
-    load_ssh_keys "$org_id" "$ssh_key_ids"
+    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
     
     echo "Fetching kubeconfig from $hostname..."
     
