@@ -346,6 +346,9 @@ browse_infrastructure() {
                 fi
             fi
             
+            # Clear SSH keys when entering new cluster context
+            clear_ssh_keys
+            
             # Mode selection loop
             while true; do
                 clear
@@ -416,6 +419,19 @@ browse_infrastructure() {
     done
 }
 
+# Clear all SSH keys from agent (called when entering a new cluster)
+clear_ssh_keys() {
+    # Check if ssh-agent is running (exit code 2 = not running, 0/1 = running)
+    local agent_status=0
+    ssh-add -l >/dev/null 2>&1 || agent_status=$?
+    if [[ $agent_status -eq 2 ]]; then
+        eval $(ssh-agent) > /dev/null
+    fi
+    
+    # Clear all existing keys
+    ssh-add -D >/dev/null 2>&1 || true
+}
+
 # Load a single SSH key to agent
 load_ssh_key() {
     local org_id="$1"
@@ -434,7 +450,7 @@ load_ssh_key() {
     echo "$private_key" | ssh-add - >/dev/null 2>&1
 }
 
-# Load SSH keys for a connection (clears existing keys, loads bastion + target)
+# Load SSH keys for a connection (loads bastion + target)
 load_connection_keys() {
     local org_id="$1"
     local bastion_key_id="$2"
@@ -446,9 +462,6 @@ load_connection_keys() {
     if [[ $agent_status -eq 2 ]]; then
         eval $(ssh-agent) > /dev/null
     fi
-    
-    # Clear all existing keys
-    ssh-add -D >/dev/null 2>&1 || true
     
     # Load bastion key
     load_ssh_key "$org_id" "$bastion_key_id"
