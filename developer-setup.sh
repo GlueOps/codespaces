@@ -314,7 +314,12 @@ dev() {
     gum style --border normal --border-foreground=240 --padding "0 2" --margin "1 0" \
         "🚀 Executing 'code tunnel' inside the container..."
     tmux switch-client -r
-    sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
+    if [ "${TAILSCALE_SERVE^^}" = "TRUE" ]; then
+        sudo tailscale serve -bg 8000
+        sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CLOUD_DEVELOPMENT_ENVIRONMENT_TOKEN"
+    else
+        sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
+    fi
 
     local exec_status=$?
     if [ $exec_status -ne 0 ]; then
