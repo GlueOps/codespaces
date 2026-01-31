@@ -344,7 +344,7 @@ dev() {
     
     [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
     if [ -n "$CDE_TOKEN" ]; then
-        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 ssh.venkatamutyala.com
+        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 tunnels.glueopshosted.com
         sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CDE_TOKEN"
     else
         sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
