@@ -23,7 +23,7 @@ echo "Installing other requirements now"
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 sudo apt-get update
-sudo apt install tmux jq figlet qemu-guest-agent -y
+sudo apt install tmux jq figlet qemu-guest-agent autossh -y
 sudo apt-get clean
 
 #export DEBIAN_FRONTEND=noninteractive
@@ -314,9 +314,38 @@ dev() {
     gum style --border normal --border-foreground=240 --padding "0 2" --margin "1 0" \
         "🚀 Executing 'code tunnel' inside the container..."
     tmux switch-client -r
-    if [ "${TAILSCALE_SERVE^^}" = "TRUE" ]; then
-        sudo tailscale serve -bg 8000
-        sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CLOUD_DEVELOPMENT_ENVIRONMENT_TOKEN"
+
+    if [ ! -f ~/.ssh/sish_tunnel_key_id_ed25519 ]; then
+        ssh-keygen -t ed25519 -f ~/.ssh/sish_tunnel_key_id_ed25519 -N "" -C "sish_tunnel_key"
+        chmod 600 ~/.ssh/sish_tunnel_key_id_ed25519
+        chmod 644 ~/.ssh/sish_tunnel_key_id_ed25519.pub
+    fi
+    
+    export AUTOSSH_GATETIME=0
+    
+    PID_FILE="/tmp/sish_tunnel.pid"
+    # check for existing pid and kill it
+    if [ -f "$PID_FILE" ]; then
+        OLD_PID=$(cat "$PID_FILE")
+        
+        # Check if process with this PID is actually running
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "Stopping existing tunnel (PID: $OLD_PID)..."
+            kill "$OLD_PID"
+            # Optional: Wait a moment for it to close cleanly
+            sleep 1
+        else
+            echo "Found PID file, but process $OLD_PID is not running. Cleaning up."
+        fi
+        
+        # Remove the old file
+        rm "$PID_FILE"
+    fi
+    
+    [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
+    if [ -n "$CDE_TOKEN" ]; then
+        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 tunnels.glueopshosted.com
+        sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CDE_TOKEN"
     else
         sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
     fi
