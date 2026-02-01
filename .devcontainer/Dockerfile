@@ -21,7 +21,7 @@ ARG VERSION_KIND=0.31.0
 # renovate: datasource=github-tags depName=derailed/k9s
 ARG VERSION_K9S=0.50.18
 # renovate: datasource=github-tags depName=terraform-docs/terraform-docs
-ARG VERSION_TERRAFORM_DOCS=0.20.0
+ARG VERSION_TERRAFORM_DOCS=0.21.0
 # renovate: datasource=github-tags depName=doitintl/kube-no-trouble
 ARG VERSION_KUBENT=0.7.3
 # renovate: datasource=github-tags depName=databus23/helm-diff
