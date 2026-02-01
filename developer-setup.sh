@@ -360,6 +360,17 @@ dev() {
 }
 
 GLUEOPSRC="$(declare -f dev)"
+# Fetch latest release if GLUEOPS_CODESPACES_CONTAINER_TAG is not set
+if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
+  echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set. Fetching latest release..."
+  GLUEOPS_CODESPACES_CONTAINER_TAG=$(curl -fsSL "https://api.github.com/repos/GlueOps/codespaces/releases/latest" | jq -r '.tag_name')
+  
+  if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ] || [ "$GLUEOPS_CODESPACES_CONTAINER_TAG" == "null" ]; then
+    echo "WARNING: Failed to fetch latest release tag. CONTAINER_TAG_TO_USE will be empty."
+  else
+    echo "Using latest release version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
+  fi
+fi
 echo "export CONTAINER_TAG_TO_USE=$GLUEOPS_CODESPACES_CONTAINER_TAG" | sudo tee -a /home/vscode/.glueopsrc
 echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
 
