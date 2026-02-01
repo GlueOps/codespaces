@@ -25,7 +25,7 @@ ARG VERSION_TERRAFORM_DOCS=0.20.0
 # renovate: datasource=github-tags depName=doitintl/kube-no-trouble
 ARG VERSION_KUBENT=0.7.3
 # renovate: datasource=github-tags depName=databus23/helm-diff
-ARG VERSION_HELM_DIFF=3.13.2
+ARG VERSION_HELM_DIFF=3.14.1
 # renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
