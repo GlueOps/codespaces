@@ -23,7 +23,7 @@ echo "Installing other requirements now"
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 sudo apt-get update
-sudo apt install tmux jq figlet qemu-guest-agent autossh -y
+sudo apt install tmux jq figlet qemu-guest-agent autossh ripgrep -y
 sudo apt-get clean
 
 #export DEBIAN_FRONTEND=noninteractive
