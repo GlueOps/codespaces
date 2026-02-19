@@ -29,7 +29,7 @@ ARG VERSION_HELM_DIFF=3.15.0
 # renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
-ARG VERSION_ARGO_CD_CLI=3.0.23
+ARG VERSION_ARGO_CD_CLI=3.3.1
 # renovate: datasource=github-tags depName=k3d-io/k3d
 ARG VERSION_K3D=5.8.3
 # renovate: datasource=github-tags depName=hashicorp/packer
