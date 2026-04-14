@@ -94,6 +94,14 @@ flow_pager() {
 }
 
 run_prerequisite_commands(){
+    helm repo add argo https://argoproj.github.io/argo-helm
+    helm repo add glueops-platform https://helm.gpkg.io/platform
+    helm repo add glueops-service https://helm.gpkg.io/service
+    helm repo add glueops-project-template https://helm.gpkg.io/project-template
+    helm repo add incubating-glueops-platform https://incubating-helm.gpkg.io/platform
+    helm repo add incubating-glueops-service https://incubating-helm.gpkg.io/service
+    helm repo add incubating-glueops-project-template https://incubating-helm.gpkg.io/project-template
+    helm repo add projectcalico https://docs.tigera.io/calico/charts
     helm repo update
 }
 
