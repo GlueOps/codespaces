@@ -103,6 +103,7 @@ run_prerequisite_commands(){
     helm repo add incubating-glueops-project-template https://incubating-helm.gpkg.io/project-template
     helm repo add projectcalico https://docs.tigera.io/calico/charts
     helm repo update
+    helm plugin install https://github.com/databus23/helm-diff
 }
 
 check_codespace_version_match(){
