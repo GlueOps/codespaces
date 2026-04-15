@@ -39,7 +39,7 @@ flow_choose() {
         local flow_index=$(_flow_get_index)
         if [ "$flow_index" -ge "${#FLOW_QUEUE[@]}" ]; then
             echo "Flow complete." >&2
-            exit 0
+            exit 1
         fi
         local idx="${FLOW_QUEUE[$flow_index]}"
         _flow_set_index $((flow_index + 1))
@@ -103,7 +103,9 @@ run_prerequisite_commands(){
     helm repo add incubating-glueops-project-template https://incubating-helm.gpkg.io/project-template
     helm repo add projectcalico https://docs.tigera.io/calico/charts
     helm repo update
-    helm plugin install https://github.com/databus23/helm-diff
+    if ! helm plugin list | grep -q '^diff'; then
+        helm plugin install https://github.com/databus23/helm-diff
+    fi
 }
 
 check_codespace_version_match(){
@@ -156,7 +158,7 @@ handle_platform_upgrades() {
             gum style --foreground 196 --bold "No Overrides.yaml detected"
             overrides_file="platform.yaml"
         fi
-        version=$(flow_choose "${versions[@]}" "Back")
+        version=$(flow_choose "${versions[@]}" "Back") || exit 0
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
@@ -201,7 +203,7 @@ handle_argocd() {
         target_file="argocd.yaml"
         namespace="glueops-core"
         chart_name="argo/argo-cd"
-        version=$(flow_choose "${versions[@]}" "Back")
+        version=$(flow_choose "${versions[@]}" "Back") || exit 0
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
@@ -218,7 +220,7 @@ handle_argocd() {
         else
             local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
         fi
-        chosen_crd_version=$(flow_choose "${argocd_crd_versions[@]}" "Back")
+        chosen_crd_version=$(flow_choose "${argocd_crd_versions[@]}" "Back") || exit 0
         pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
         # Check if user wants to go back
         if [ "$chosen_crd_version" = "Back" ]; then
@@ -302,7 +304,8 @@ handle_kubernetes_version() {
 
 
 handle_aws_options() {
-    local aws_component=$(flow_choose "calico" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit")
+    local aws_component
+    aws_component=$(flow_choose "calico" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit") || exit 0
     # Handle exit option
     if [ "$aws_component" = "Exit" ]; then
         echo "Goodbye!"
@@ -334,7 +337,7 @@ handle_inspect_pods() {
 
 show_production(){
     while true; do
-        component=$(flow_choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
+        component=$(flow_choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit") || exit 0
 
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -368,7 +371,7 @@ show_production(){
 
 show_dev(){
     while true; do
-        component=$(flow_choose "argocd" "glueops-platform" "aws" "Exit")
+        component=$(flow_choose "argocd" "glueops-platform" "aws" "Exit") || exit 0
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -397,7 +400,7 @@ run_prerequisite_commands
 
 while true; do
     # Show main menu
-    environment=$(flow_choose "dev" "production" "Exit")
+    environment=$(flow_choose "dev" "production" "Exit") || exit 0
 
     # Handle exit option
     if [ "$environment" = "Exit" ]; then
