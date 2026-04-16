@@ -31,7 +31,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate Variables for Tags
-        uses: rlespinasse/github-slug-action@1bf76b7bc6ef7dc6ba597ff790f956d9082479d7 # v3.6
+        uses: rlespinasse/github-slug-action@5150a26d43ce06608443c66efea46fc6f3c50d38 # v3.7
 
       - name: Build and run dev container task
         uses: devcontainers/ci@8bf61b26e9c3a98f69cb6ce2f88d24ff59b785c6 # v0.3
