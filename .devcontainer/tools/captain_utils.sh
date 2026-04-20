@@ -20,6 +20,10 @@ _flow_set_index() { echo "$1" > "$FLOW_INDEX_FILE"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --flow)
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Error: --flow requires a comma-separated queue argument" >&2
+                exit 1
+            fi
             FLOW_MODE=true
             IFS=',' read -r -a FLOW_QUEUE <<< "$2"
             shift 2
@@ -267,7 +271,7 @@ handle_calico_upgrades() {
     helm repo update
 
     set -x
-    helm diff --color upgrade calico projectcalico/tigera-operator --version ${calico_version} --namespace tigera-operator -f calico.yaml --allow-unreleased | flow_pager
+    helm diff --color upgrade calico projectcalico/tigera-operator --version "${calico_version}" --namespace tigera-operator -f calico.yaml --allow-unreleased | flow_pager
     gum style --bold --foreground 212 "✅ Diff complete."
     set +x
 
@@ -282,7 +286,7 @@ handle_calico_upgrades() {
     
     gum style --bold --foreground 196 "Deploying calico helm chart ${calico_version}"
     
-    helm upgrade --install calico projectcalico/tigera-operator --version ${calico_version} --namespace tigera-operator -f calico.yaml --create-namespace
+    helm upgrade --install calico projectcalico/tigera-operator --version "${calico_version}" --namespace tigera-operator -f calico.yaml --create-namespace
     
     set +x
 
