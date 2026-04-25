@@ -25,6 +25,8 @@ sudo sh get-docker.sh
 sudo apt-get update
 sudo apt install tmux jq figlet qemu-guest-agent autossh ripgrep -y
 sudo apt-get clean
+sudo mkdir -p /etc/qemu
+printf '[general]\nblacklist =\n' | sudo tee /etc/qemu/qemu-ga.conf
 
 #export DEBIAN_FRONTEND=noninteractive
 #sudo apt-get -s dist-upgrade | grep "^Inst" | grep -i securi | awk -F " " {'print $2'} | xargs sudo apt-get install -y
