@@ -24,4 +24,9 @@ git_email=$(gh api -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Ver
 git_name=$(gh api user | jq '.name' -r)
 git config --global user.email "${git_email}"
 git config --global user.name "${git_name}"
+echo "git config --global core.autocrlf input"
 git config --global core.autocrlf input
+echo "git config merge.ours.driver true"
+git config merge.ours.driver true
+echo "git conifgs are done!"
+
