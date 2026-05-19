@@ -40,6 +40,8 @@ ARG VERSION_HASHICORP_PACKER=1.15.1
 ENV VAULT_SKIP_VERIFY true
 ENV CLOUDSDK_INSTALL_DIR /usr/local/gcloud/
 ENV GIT_EDITOR vi
+# enable team of agents: https://code.claude.com/docs/en/agent-teams
+ENV CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
 COPY tools/ /etc/tools/
 
@@ -174,6 +176,7 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;33m💡 Tip: Use '\''git commit'\'' and '\''git push'\'' regularly to avoid losing your work.\e[0m"' | tee -a /home/vscode/.zshrc && \
     echo '# =============================' | tee -a /home/vscode/.zshrc && \
+    echo 'export PATH="$HOME/.local/bin:$PATH"' | tee -a /home/vscode/.zshrc && \
     chown vscode:vscode /home/vscode/.zshrc
 
 USER root
