@@ -65,6 +65,8 @@ jobs:
       - name: Run packer build
         id: build
         run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} -var image_password=${{ env.IMAGE_PASSWORD }} qemu.pkr.hcl
+        env:
+          PACKER_LOG: 1
 
 
       - id: install-aws-cli
