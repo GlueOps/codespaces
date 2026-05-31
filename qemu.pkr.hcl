@@ -12,7 +12,7 @@ source "qemu" "qemu-amd64" {
   iso_checksum      = "file:https://cloud.debian.org/images/cloud/bookworm/daily/latest/SHA512SUMS"
   disk_image        = true
   output_directory  = "images"
-  disk_size         = 10000
+  disk_size         = 20000
   format            = "qcow2"
   vm_name           = "${var.glueops_codespaces_container_tag}.qcow2"
   ssh_username      = "debian"
