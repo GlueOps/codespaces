@@ -416,6 +416,10 @@ else
   until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
 fi
 
+echo "disk usage after docker pull:"
+df -h /
+sudo du -sh /var/lib/docker 2>/dev/null || true
+
 echo -e "\n\n\n\n\nPlease reboot using: sudo reboot \n\n"
 
 
