@@ -13,7 +13,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:81380e4c9
 # renovate: datasource=github-tags depName=kubernetes/kubectl
 ARG VERSION_KUBECTL=1.34.6
 # renovate: datasource=github-tags depName=opentofu/opentofu
-ARG VERSION_OPENTOFU=1.11.6
+ARG VERSION_OPENTOFU=1.12.0
 # renovate: datasource=github-tags depName=helm/helm
 ARG VERSION_HELM=3.19.5
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
