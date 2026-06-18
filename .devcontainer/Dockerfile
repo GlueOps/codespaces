@@ -34,6 +34,8 @@ ARG VERSION_ARGO_CD_CLI=3.2.11
 ARG VERSION_K3D=5.8.3
 # renovate: datasource=github-tags depName=hashicorp/packer
 ARG VERSION_HASHICORP_PACKER=1.15.1
+# renovate: datasource=github-tags depName=kubernetes-sigs/krew
+ARG VERSION_KREW=0.4.5
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -104,7 +106,7 @@ RUN wget "https://releases.hashicorp.com/packer/${VERSION_HASHICORP_PACKER}/pack
     && rm packer_${VERSION_HASHICORP_PACKER}_linux_amd64.zip \
     && rm LICENSE.txt
 
-RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\ 
+RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
     sudo chmod +x /usr/local/bin/yq
 
 # Install code tunnel so we can run outside of github codespaces easily
@@ -143,6 +145,17 @@ USER vscode
 RUN code --install-extension MS-vsliveshare.vsliveshare --extensions-dir /home/vscode/.vscode-remote/extensions
 RUN code --install-extension GitHub.codespaces --extensions-dir /home/vscode/.vscode-remote/extensions
 
+# Install krew (kubectl plugin manager) into $HOME/.krew, then install the oidc-login plugin
+RUN cd /tmp \
+    && curl -fsSLO https://github.com/kubernetes-sigs/krew/releases/download/v${VERSION_KREW}/krew-linux_amd64.tar.gz \
+    && tar zxf krew-linux_amd64.tar.gz \
+    && ./krew-linux_amd64 install krew \
+    && rm -f krew-linux_amd64 krew-linux_amd64.tar.gz LICENSE \
+    && export PATH="$HOME/.krew/bin:$PATH" \
+    && kubectl krew install oidc-login \
+    && kubectl krew version \
+    && kubectl oidc-login --help > /dev/null
+
 RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
 # 0.14.0 came out a couple weeks ago and it appears to be problematic. So pinning and manually upgrading seems like a good option
 ENV DEVBOX_USE_VERSION=0.13.0
@@ -176,7 +189,7 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;33m💡 Tip: Use '\''git commit'\'' and '\''git push'\'' regularly to avoid losing your work.\e[0m"' | tee -a /home/vscode/.zshrc && \
     echo '# =============================' | tee -a /home/vscode/.zshrc && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' | tee -a /home/vscode/.zshrc && \
+    echo 'export PATH="$HOME/.local/bin:$HOME/.krew/bin:$PATH"' | tee -a /home/vscode/.zshrc && \
     chown vscode:vscode /home/vscode/.zshrc
 
 USER root
