@@ -17,6 +17,11 @@ jobs:
     runs-on: codespaces
     timeout-minutes: 60
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
       - name: Enable KVM group perms
         run: |
             echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -92,7 +97,7 @@ jobs:
            split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
 
       - name: Upload *.qcow2.tar.part_* files to GitHub Releases as an Asset
-        uses: xresloader/upload-to-github-release@v1
+        uses: xresloader/upload-to-github-release@7c5757a90c0bcf0c0e1741da8f2abd7b85e675d0 # v1.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
