@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.145.0](https://github.com/GlueOps/codespaces/compare/v0.144.0...v0.145.0) (2026-07-01)
+
+
+### Features
+
+* install claude code cli in devcontainer image ([#504](https://github.com/GlueOps/codespaces/issues/504)) ([bbb22df](https://github.com/GlueOps/codespaces/commit/bbb22df437ed62e195a8590bb84fe4805d984e9d))
+
 ## [0.144.0](https://github.com/GlueOps/codespaces/compare/v0.143.0...v0.144.0) (2026-07-01)
 
 
