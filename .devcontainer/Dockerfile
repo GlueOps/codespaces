@@ -35,7 +35,7 @@ ARG VERSION_K3D=5.8.3
 # renovate: datasource=github-tags depName=hashicorp/packer
 ARG VERSION_HASHICORP_PACKER=1.15.1
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
-ARG VERSION_KREW=0.4.5
+ARG VERSION_KREW=0.5.0
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
