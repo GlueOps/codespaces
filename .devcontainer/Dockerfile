@@ -36,6 +36,8 @@ ARG VERSION_K3D=5.8.3
 ARG VERSION_HASHICORP_PACKER=1.15.1
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
 ARG VERSION_KREW=0.5.0
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG VERSION_CLAUDE_CODE=2.1.197
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
 ARG VERSION_CLOUDFLARED=2026.6.1
 
@@ -169,6 +171,10 @@ RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
 # 0.14.0 came out a couple weeks ago and it appears to be problematic. So pinning and manually upgrading seems like a good option
 ENV DEVBOX_USE_VERSION=0.13.0
 RUN curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
+
+# Install Claude Code via the native (nodeless) installer into ~/.local/bin, which is already on PATH.
+# npm isn't available at image-build time (node comes from a devcontainer feature applied afterwards).
+RUN curl -fsSL https://claude.ai/install.sh | bash -s ${VERSION_CLAUDE_CODE}
 
 
 RUN mkdir -p /home/vscode/.vscode-server
