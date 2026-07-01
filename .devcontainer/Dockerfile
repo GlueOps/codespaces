@@ -36,6 +36,8 @@ ARG VERSION_K3D=5.8.3
 ARG VERSION_HASHICORP_PACKER=1.15.1
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
 ARG VERSION_KREW=0.5.0
+# renovate: datasource=github-tags depName=cloudflare/cloudflared
+ARG VERSION_CLOUDFLARED=2026.6.1
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -108,6 +110,10 @@ RUN wget "https://releases.hashicorp.com/packer/${VERSION_HASHICORP_PACKER}/pack
 
 RUN wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&\
     sudo chmod +x /usr/local/bin/yq
+
+# dpkg --print-architecture (amd64/arm64) matches cloudflared's asset naming, so this works for a future multi-arch build
+RUN curl -Lo /usr/local/bin/cloudflared https://github.com/cloudflare/cloudflared/releases/download/${VERSION_CLOUDFLARED}/cloudflared-linux-$(dpkg --print-architecture) \
+    && chmod +x /usr/local/bin/cloudflared
 
 # Install code tunnel so we can run outside of github codespaces easily
 RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg \
