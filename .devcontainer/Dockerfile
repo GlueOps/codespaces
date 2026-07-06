@@ -199,6 +199,8 @@ RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
   sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg && \
   sudo apt update && sudo apt install 1password-cli
 
+RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colorTheme": "VS Code Dark"}' > /home/vscode/.vscode-server/data/Machine/settings.json
+
 # Add backup warning to .zshrc for vscode user
 RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
