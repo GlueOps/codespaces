@@ -31,7 +31,7 @@ ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
 ARG VERSION_ARGO_CD_CLI=3.3.11
 # renovate: datasource=github-tags depName=k3d-io/k3d
-ARG VERSION_K3D=5.8.3
+ARG VERSION_K3D=5.9.0
 # renovate: datasource=github-tags depName=hashicorp/packer
 ARG VERSION_HASHICORP_PACKER=1.15.1
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
