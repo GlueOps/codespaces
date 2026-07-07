@@ -69,23 +69,21 @@ handle_platform_upgrades() {
         echo "chosen version: $version for $chart_name"
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
-        
-        set -x
+
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template'):"
+        echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
-        set +x
-        
+
         if ! gum confirm "Apply upgrade"; then
             return
         fi
-        
-        # Running helm diff command
-        gum style --bold --foreground 212 "The following commands will be executed:"
-        
-        set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace 
-        set +x
-        return 
+
+        helm_upgrade_cmd="helm upgrade --install \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --create-namespace"
+        gum style --bold --foreground 212 "The following commands will be executed (copy to re-run or debug):"
+        echo "$helm_upgrade_cmd"
+        eval "$helm_upgrade_cmd"
+        return
     done
 }
 
@@ -160,35 +158,31 @@ handle_argocd() {
             return
         fi
         
-        set -x
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template'):"
+        echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
-        set +x
-        
+
         if ! gum confirm "Apply upgrade"; then
             return
         fi
-        
-        # Running helm diff command
-        gum style --bold --foreground 212 "The following commands will be executed:"
-        
+
         # New: Execute pre_commands if defined
         if [ -n "$pre_commands" ] && [ -n "$chosen_crd_version" ]; then
-            gum style --bold --foreground 212 "Executing pre-commands for $component:"
-            set -x
+            gum style --bold --foreground 212 "Executing pre-commands for $component (copy to re-run or debug):"
+            echo "$pre_commands"
             eval "$pre_commands"
             if [ $? -ne 0 ]; then
                 gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting diff."
-                set +x
                 continue # Allow user to retry or go back
             fi
-            set +x
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
-        set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file"  -n "$namespace" --create-namespace --skip-crds
-        set +x
-        return 
+        helm_upgrade_cmd="helm upgrade --install \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -n \"$namespace\" --create-namespace --skip-crds"
+        gum style --bold --foreground 212 "The following commands will be executed (copy to re-run or debug):"
+        echo "$helm_upgrade_cmd"
+        eval "$helm_upgrade_cmd"
+        return
     done
 
 }
