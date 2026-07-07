@@ -89,6 +89,33 @@ handle_platform_upgrades() {
     done
 }
 
+# Installs the kube-prometheus-stack CRDs, replicating the kube-prometheus-stack-crds
+# ArgoCD app from platform-helm-chart-platform. The chart version comes from
+# VERSIONS/glueops.yaml (kube_prometheus_stack_version) like the other components.
+# Server-side apply is used because the prometheus CRDs are too large for client-side
+# apply (mirrors the app's Replace=true).
+install_kube_prometheus_stack_crds() {
+    local kps_version crds_ref crd
+    if [ "$environment" = "production" ]; then
+        kps_version=$(yq '.versions[] | select(.name == "kube_prometheus_stack_version") | .version' VERSIONS/glueops.yaml)
+    else
+        kps_version=$(curl -sf "https://raw.githubusercontent.com/GlueOps/platform-helm-chart-platform/main/templates/application-kube-prometheus-stack-crds.yaml" | yq '.spec.source.targetRevision' | sed 's/^kube-prometheus-stack-//')
+    fi
+    if [ -z "$kps_version" ]; then
+        gum style --bold --foreground 196 "❌ kube_prometheus_stack_version not found in VERSIONS/glueops.yaml. Re-run terraform with an updated terraform-module-cloud-multy-prerequisites to regenerate it."
+        return 1
+    fi
+    crds_ref="kube-prometheus-stack-${kps_version}"
+    gum style --bold --foreground 212 "Installing kube-prometheus-stack CRDs (${crds_ref}):"
+    local crds_dir
+    crds_dir=$(mktemp -d)
+    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse \
+        https://github.com/prometheus-community/helm-charts.git "$crds_dir"
+    git -C "$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds
+    kubectl apply --server-side --force-conflicts -R -f "$crds_dir/charts/kube-prometheus-stack/charts/crds/crds"
+    rm -rf "$crds_dir"
+}
+
 handle_argocd() {
     if [ "$environment" = "production" ]; then
         argocd_version=`yq '.versions[] | select(.name == "argocd_helm_chart_version") | .version' VERSIONS/glueops.yaml`
@@ -123,7 +150,7 @@ handle_argocd() {
             local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
         fi
         chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
-        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
+        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update && install_kube_prometheus_stack_crds"
         # Check if user wants to go back
         if [ "$chosen_crd_version" = "Back" ]; then
             return
