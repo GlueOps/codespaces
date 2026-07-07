@@ -70,7 +70,7 @@ handle_platform_upgrades() {
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
 
-        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template'):"
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template' and drop '--allow-unreleased'):"
         echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
@@ -93,7 +93,7 @@ handle_platform_upgrades() {
 # Server-side apply is used because the prometheus CRDs are too large for client-side
 # apply (mirrors the app's Replace=true).
 install_kube_prometheus_stack_crds() {
-    local kps_version crds_ref crd
+    local kps_version crds_ref crds_dir=""
     if [ "$environment" = "production" ]; then
         kps_version=$(yq '.versions[] | select(.name == "kube_prometheus_stack_version") | .version' VERSIONS/glueops.yaml)
     else
@@ -106,16 +106,20 @@ install_kube_prometheus_stack_crds() {
     crds_ref="kube-prometheus-stack-${kps_version}"
     local install_cmds
     install_cmds=$(cat <<EOF
-crds_dir=\$(mktemp -d)
-git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse https://github.com/prometheus-community/helm-charts.git "\$crds_dir"
-git -C "\$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds
-kubectl apply --server-side --force-conflicts -R -f "\$crds_dir/charts/kube-prometheus-stack/charts/crds/crds"
+crds_dir=\$(mktemp -d) &&
+GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse https://github.com/prometheus-community/helm-charts.git "\$crds_dir" &&
+git -C "\$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds &&
+kubectl apply --server-side --force-conflicts -R -f "\$crds_dir/charts/kube-prometheus-stack/charts/crds/crds" &&
 rm -rf "\$crds_dir"
 EOF
 )
     gum style --bold --foreground 212 "Installing kube-prometheus-stack CRDs (${crds_ref}) using the following commands (copy to re-run or debug):"
     echo "$install_cmds"
-    eval "$install_cmds"
+    if ! eval "$install_cmds"; then
+        if [ -d "$crds_dir" ]; then rm -rf "$crds_dir"; fi
+        gum style --bold --foreground 196 "❌ kube-prometheus-stack CRD install failed."
+        return 1
+    fi
 }
 
 handle_argocd() {
@@ -152,13 +156,13 @@ handle_argocd() {
             local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
         fi
         chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
-        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update && install_kube_prometheus_stack_crds"
+        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
         # Check if user wants to go back
         if [ "$chosen_crd_version" = "Back" ]; then
             return
         fi
         
-        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template'):"
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template' and drop '--allow-unreleased'):"
         echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
@@ -171,9 +175,9 @@ handle_argocd() {
         if [ -n "$pre_commands" ] && [ -n "$chosen_crd_version" ]; then
             gum style --bold --foreground 212 "Executing pre-commands for $component (copy to re-run or debug):"
             echo "$pre_commands"
-            eval "$pre_commands"
-            if [ $? -ne 0 ]; then
-                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting diff."
+            # The tested condition suspends set -e so failures land in the retry path below
+            if ! eval "$pre_commands" || ! install_kube_prometheus_stack_crds; then
+                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting upgrade."
                 continue # Allow user to retry or go back
             fi
             gum style --bold --foreground 212 "✅ Pre-commands complete."
