@@ -106,14 +106,18 @@ install_kube_prometheus_stack_crds() {
         return 1
     fi
     crds_ref="kube-prometheus-stack-${kps_version}"
-    gum style --bold --foreground 212 "Installing kube-prometheus-stack CRDs (${crds_ref}):"
-    local crds_dir
-    crds_dir=$(mktemp -d)
-    git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse \
-        https://github.com/prometheus-community/helm-charts.git "$crds_dir"
-    git -C "$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds
-    kubectl apply --server-side --force-conflicts -R -f "$crds_dir/charts/kube-prometheus-stack/charts/crds/crds"
-    rm -rf "$crds_dir"
+    local install_cmds
+    install_cmds=$(cat <<EOF
+crds_dir=\$(mktemp -d)
+git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse https://github.com/prometheus-community/helm-charts.git "\$crds_dir"
+git -C "\$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds
+kubectl apply --server-side --force-conflicts -R -f "\$crds_dir/charts/kube-prometheus-stack/charts/crds/crds"
+rm -rf "\$crds_dir"
+EOF
+)
+    gum style --bold --foreground 212 "Installing kube-prometheus-stack CRDs (${crds_ref}) using the following commands (copy to re-run or debug):"
+    echo "$install_cmds"
+    eval "$install_cmds"
 }
 
 handle_argocd() {
