@@ -19,7 +19,7 @@ ARG VERSION_HELM=3.20.2
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
 ARG VERSION_KIND=0.31.0
 # renovate: datasource=github-tags depName=derailed/k9s
-ARG VERSION_K9S=0.50.18
+ARG VERSION_K9S=0.51.0
 # renovate: datasource=github-tags depName=terraform-docs/terraform-docs
 ARG VERSION_TERRAFORM_DOCS=0.24.0
 # renovate: datasource=github-tags depName=doitintl/kube-no-trouble
