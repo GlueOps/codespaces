@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.1](https://github.com/GlueOps/codespaces/compare/v0.146.0...v0.146.1) (2026-07-10)
+
+
+### Miscellaneous Chores
+
+* **main:** release 0.146.0 ([#517](https://github.com/GlueOps/codespaces/issues/517)) ([94fb1b1](https://github.com/GlueOps/codespaces/commit/94fb1b158804d24fd0455299cc6e125048a829e4))
+
 ## [0.146.0](https://github.com/GlueOps/codespaces/compare/v0.145.0...v0.146.0) (2026-07-10)
 
 
