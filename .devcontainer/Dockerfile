@@ -201,6 +201,31 @@ RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
 
 RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colorTheme": "VS Code Dark"}' > /home/vscode/.vscode-server/data/Machine/settings.json
 
+# The apt `code` package installs the desktop (Electron) binary at /usr/bin/code.
+# In these headless serve-web/tunnel sessions there is no X display, so running
+# `code <file>` in the terminal crashes ("Missing X server or $DISPLAY").
+# Drop a wrapper on $HOME/.local/bin (first on the interactive PATH, see .zshrc/.bashrc
+# below) that forwards to the serve-web/remote-cli shim, which opens files in the
+# already-running VS Code window via $VSCODE_IPC_HOOK_CLI. Picks the newest shim so it
+# keeps working across VS Code updates. Only affects interactive shells; build-time
+# `code --install-extension` above still resolves to /usr/bin/code.
+RUN mkdir -p /home/vscode/.local/bin \
+    && printf '%s\n' \
+        '#!/usr/bin/env sh' \
+        '# Route `code` to the VS Code serve-web/remote CLI shim instead of the GUI desktop' \
+        '# binary (/usr/bin/code), which has no display in this container and crashes.' \
+        'shim=$(ls -t "$HOME"/.vscode/cli/serve-web/*/bin/remote-cli/code \' \
+        '              "$HOME"/.vscode-server/bin/*/bin/remote-cli/code \' \
+        '              "$HOME"/.vscode-server/cli/servers/*/server/bin/remote-cli/code \' \
+        '              2>/dev/null | head -n1)' \
+        'if [ -n "$shim" ]; then' \
+        '  exec "$shim" "$@"' \
+        'fi' \
+        'echo "code: no VS Code remote CLI shim found; is a serve-web/remote session running?" >&2' \
+        'exit 1' \
+        > /home/vscode/.local/bin/code \
+    && chmod +x /home/vscode/.local/bin/code
+
 # Add backup warning to .zshrc for vscode user
 RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'echo -e "\e[1;31m⚠️  WARNING: No backups are configured. You are responsible for any data loss.\e[0m"' | tee -a /home/vscode/.zshrc && \
