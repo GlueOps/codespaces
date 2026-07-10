@@ -206,23 +206,44 @@ RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colo
 # `code <file>` in the terminal crashes ("Missing X server or $DISPLAY").
 # Drop a wrapper on $HOME/.local/bin (first on the interactive PATH, see .zshrc/.bashrc
 # below) that forwards to the serve-web/remote-cli shim, which opens files in the
-# already-running VS Code window via $VSCODE_IPC_HOOK_CLI. Picks the newest shim so it
-# keeps working across VS Code updates. Only affects interactive shells; build-time
+# already-running VS Code window via the $VSCODE_IPC_HOOK_CLI socket. The wrapper picks
+# the newest shim so it survives VS Code updates, and recovers from a stale socket after
+# a reconnect (see the inline comments). Only affects interactive shells; build-time
 # `code --install-extension` above still resolves to /usr/bin/code.
 RUN mkdir -p /home/vscode/.local/bin \
     && printf '%s\n' \
         '#!/usr/bin/env sh' \
         '# Route `code` to the VS Code serve-web/remote CLI shim instead of the GUI desktop' \
         '# binary (/usr/bin/code), which has no display in this container and crashes.' \
+        '' \
+        '# 1. Locate the remote CLI shim. There is one per installed VS Code build, and the' \
+        '#    path embeds a build hash, so pick the newest to survive VS Code updates.' \
         'shim=$(ls -t "$HOME"/.vscode/cli/serve-web/*/bin/remote-cli/code \' \
         '              "$HOME"/.vscode-server/bin/*/bin/remote-cli/code \' \
         '              "$HOME"/.vscode-server/cli/servers/*/server/bin/remote-cli/code \' \
         '              2>/dev/null | head -n1)' \
-        'if [ -n "$shim" ]; then' \
-        '  exec "$shim" "$@"' \
+        'if [ -z "$shim" ]; then' \
+        '  echo "code: no VS Code remote CLI shim found; is a serve-web/remote session running?" >&2' \
+        '  exit 1' \
         'fi' \
-        'echo "code: no VS Code remote CLI shim found; is a serve-web/remote session running?" >&2' \
-        'exit 1' \
+        '' \
+        '# 2. The shim talks to the running window over the IPC socket named in' \
+        '#    $VSCODE_IPC_HOOK_CLI. That value is captured when the shell starts, so after a' \
+        '#    VS Code reconnect (container or server restart) it can name a socket that no' \
+        '#    longer exists. Only when the referenced socket is gone, fall back to the most' \
+        '#    recently created /tmp/vscode-ipc-*.sock so `code` keeps working without opening' \
+        '#    a fresh terminal. A still-present socket is left untouched, so routing stays' \
+        '#    correct when multiple windows (each with its own socket) are connected.' \
+        'if [ -z "$VSCODE_IPC_HOOK_CLI" ] || [ ! -S "$VSCODE_IPC_HOOK_CLI" ]; then' \
+        '  newest_sock=$(ls -t /tmp/vscode-ipc-*.sock 2>/dev/null | head -n1)' \
+        '  if [ -n "$newest_sock" ]; then' \
+        '    VSCODE_IPC_HOOK_CLI="$newest_sock"' \
+        '    export VSCODE_IPC_HOOK_CLI' \
+        '  fi' \
+        'fi' \
+        '' \
+        '# 3. Hand off to the shim, preserving every argument and its exit status.' \
+        'exec "$shim" "$@"' \
         > /home/vscode/.local/bin/code \
     && chmod +x /home/vscode/.local/bin/code
 
