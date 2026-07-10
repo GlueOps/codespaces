@@ -217,13 +217,15 @@ RUN mkdir -p /home/vscode/.local/bin \
         '# binary (/usr/bin/code), which has no display in this container and crashes.' \
         '' \
         '# 1. Locate the remote CLI shim. There is one per installed VS Code build, and the' \
-        '#    path embeds a build hash, so pick the newest to survive VS Code updates.' \
+        '#    path embeds a build hash, so pick the newest to survive VS Code updates. The' \
+        '#    -x check turns a found-but-not-executable match into the friendly error below' \
+        '#    instead of an opaque `exec: Permission denied`.' \
         'shim=$(ls -t "$HOME"/.vscode/cli/serve-web/*/bin/remote-cli/code \' \
         '              "$HOME"/.vscode-server/bin/*/bin/remote-cli/code \' \
         '              "$HOME"/.vscode-server/cli/servers/*/server/bin/remote-cli/code \' \
         '              2>/dev/null | head -n1)' \
-        'if [ -z "$shim" ]; then' \
-        '  echo "code: no VS Code remote CLI shim found; is a serve-web/remote session running?" >&2' \
+        'if [ -z "$shim" ] || [ ! -x "$shim" ]; then' \
+        '  echo "code: no usable VS Code remote CLI shim found; is a serve-web/remote session running?" >&2' \
         '  exit 1' \
         'fi' \
         '' \
