@@ -18,6 +18,7 @@
 * **fallback:** update docker/login-action ([#511](https://github.com/GlueOps/codespaces/issues/511)) ([813f6dc](https://github.com/GlueOps/codespaces/commit/813f6dcecc7032ba418e657d9fccfcb613c16f1e))
 * **fallback:** update docker/login-action ([#516](https://github.com/GlueOps/codespaces/issues/516)) ([8442e02](https://github.com/GlueOps/codespaces/commit/8442e02c4b1bd3a10ac8e215e2c0872cd24602f6))
 * **patch:** update databus23/helm-diff to v3.15.8 #patch ([#512](https://github.com/GlueOps/codespaces/issues/512)) ([d8caa8e](https://github.com/GlueOps/codespaces/commit/d8caa8e155b04a685344de01d622be97c925daa0))
+* **patch:** update hashicorp/packer to v1.15.4 #patch ([#486](https://github.com/GlueOps/codespaces/issues/486)) ([d18c92f](https://github.com/GlueOps/codespaces/commit/d18c92fd01a280498036ebb61ff22897535d93e4))
 
 ## [0.145.0](https://github.com/GlueOps/codespaces/compare/v0.144.0...v0.145.0) (2026-07-01)
 
