@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.147.0](https://github.com/GlueOps/codespaces/compare/v0.146.1...v0.147.0) (2026-07-11)
+
+
+### Features
+
+* pass code tunnel/serve-web through; harden socket probe ([a0769ed](https://github.com/GlueOps/codespaces/commit/a0769ed8a670c170da183d0b6a90907eb225d0a4))
+
+
+### Bug Fixes
+
+* make `code <file>` work in serve-web terminals ([93437d7](https://github.com/GlueOps/codespaces/commit/93437d7e57b723d332296081a6fcf07aaecde8ab))
+* recover `code` from stale IPC socket after reconnect ([1731ce9](https://github.com/GlueOps/codespaces/commit/1731ce9c4b80d4a4ee281f620012c9d3f0f101c4))
+* require the resolved `code` shim to be executable ([017e29f](https://github.com/GlueOps/codespaces/commit/017e29f032f4951373d9b3c21e620ebc83d666eb))
+* route `code` to the newest live window socket (tmux fix) ([904829c](https://github.com/GlueOps/codespaces/commit/904829c8aebfb6971b20815ff21b6a9a3d3d52a2))
+
 ## [0.146.1](https://github.com/GlueOps/codespaces/compare/v0.146.0...v0.146.1) (2026-07-10)
 
 
