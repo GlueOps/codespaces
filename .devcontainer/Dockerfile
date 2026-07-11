@@ -77,7 +77,7 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
 
 
 RUN apt update \
-    && apt install tmux dnsutils telnet iputils-ping jq certbot nethogs nload vim -y \
+    && apt install tmux dnsutils telnet iputils-ping jq certbot nethogs nload vim socat -y \
     && apt clean -y
 RUN curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v${VERSION_KIND}/kind-linux-amd64 \
     && chmod +x /usr/local/bin/kind
@@ -205,18 +205,19 @@ RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colo
 # In these headless serve-web/tunnel sessions there is no X display, so running
 # `code <file>` in the terminal crashes ("Missing X server or $DISPLAY").
 # Drop a wrapper on $HOME/.local/bin (first on the interactive PATH, see .zshrc/.bashrc
-# below) that forwards to the serve-web/remote-cli shim, which opens files in the
-# already-running VS Code window via the $VSCODE_IPC_HOOK_CLI socket. The wrapper picks
-# the newest shim so it survives VS Code updates, and recovers from a stale socket after
-# a reconnect (see the inline comments). Only affects interactive shells; build-time
-# `code --install-extension` above still resolves to /usr/bin/code.
+# below) that forwards to the serve-web/remote-cli shim, which opens files in a running
+# VS Code window over its $VSCODE_IPC_HOOK_CLI socket. The wrapper picks the newest shim
+# so it survives VS Code updates, and routes to the newest live window socket so it keeps
+# working in long-lived shells (e.g. tmux) whose captured socket has gone stale (see the
+# inline comments). Only affects interactive shells; build-time `code --install-extension`
+# above still resolves to /usr/bin/code.
 RUN mkdir -p /home/vscode/.local/bin \
     && printf '%s\n' \
         '#!/usr/bin/env sh' \
         '# Route `code` to the VS Code serve-web/remote CLI shim instead of the GUI desktop' \
         '# binary (/usr/bin/code), which has no display in this container and crashes.' \
         '' \
-        '# 1. Locate the remote CLI shim. There is one per installed VS Code build, and the' \
+        '# 1. Locate the remote CLI shim. There is one per installed VS Code build and the' \
         '#    path embeds a build hash, so pick the newest to survive VS Code updates. The' \
         '#    -x check turns a found-but-not-executable match into the friendly error below' \
         '#    instead of an opaque `exec: Permission denied`.' \
@@ -229,20 +230,28 @@ RUN mkdir -p /home/vscode/.local/bin \
         '  exit 1' \
         'fi' \
         '' \
-        '# 2. The shim talks to the running window over the IPC socket named in' \
-        '#    $VSCODE_IPC_HOOK_CLI. That value is captured when the shell starts, so after a' \
-        '#    VS Code reconnect (container or server restart) it can name a socket that no' \
-        '#    longer exists. Only when the referenced socket is gone, fall back to the most' \
-        '#    recently created /tmp/vscode-ipc-*.sock so `code` keeps working without opening' \
-        '#    a fresh terminal. A still-present socket is left untouched, so routing stays' \
-        '#    correct when multiple windows (each with its own socket) are connected.' \
-        'if [ -z "$VSCODE_IPC_HOOK_CLI" ] || [ ! -S "$VSCODE_IPC_HOOK_CLI" ]; then' \
-        '  newest_sock=$(ls -t /tmp/vscode-ipc-*.sock 2>/dev/null | head -n1)' \
-        '  if [ -n "$newest_sock" ]; then' \
-        '    VSCODE_IPC_HOOK_CLI="$newest_sock"' \
+        '# 2. Choose the IPC socket of the window to open files in. $VSCODE_IPC_HOOK_CLI is' \
+        '#    captured when the shell starts, so a long-lived shell (e.g. a tmux server that' \
+        '#    outlives a VS Code reconnect) keeps pointing at an OLD window. That old socket' \
+        '#    often still accepts connections, so files silently open in a window you can no' \
+        '#    longer see. VS Code creates one socket per window/connection under /tmp, so the' \
+        '#    newest is your current window: prefer the newest socket that still accepts a' \
+        '#    connection, falling back to older ones. If none is reachable, keep whatever the' \
+        '#    environment provided so socket-less subcommands (code --version, etc.) still work.' \
+        'ipc_live() {' \
+        '  [ -S "$1" ] || return 1' \
+        '  # Best-effort connect probe to skip sockets whose window has gone away. socat is' \
+        '  # optional here: if it is not installed, treat an existing socket as usable.' \
+        '  command -v socat >/dev/null 2>&1 || return 0' \
+        '  socat -u OPEN:/dev/null UNIX-CONNECT:"$1" >/dev/null 2>&1' \
+        '}' \
+        'for sock in $(ls -t /tmp/vscode-ipc-*.sock 2>/dev/null); do' \
+        '  if ipc_live "$sock"; then' \
+        '    VSCODE_IPC_HOOK_CLI="$sock"' \
         '    export VSCODE_IPC_HOOK_CLI' \
+        '    break' \
         '  fi' \
-        'fi' \
+        'done' \
         '' \
         '# 3. Hand off to the shim, preserving every argument and its exit status.' \
         'exec "$shim" "$@"' \
