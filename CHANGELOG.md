@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.148.0](https://github.com/GlueOps/codespaces/compare/v0.147.0...v0.148.0) (2026-07-11)
+
+
+### Features
+
+* disable VS Code Workspace Trust in the image ([86a5552](https://github.com/GlueOps/codespaces/commit/86a555259f8cadefa12afc2be3d62e49c25ace54))
+
 ## [0.147.0](https://github.com/GlueOps/codespaces/compare/v0.146.1...v0.147.0) (2026-07-11)
 
 
