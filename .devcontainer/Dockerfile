@@ -217,6 +217,15 @@ RUN mkdir -p /home/vscode/.local/bin \
         '# Route `code` to the VS Code serve-web/remote CLI shim instead of the GUI desktop' \
         '# binary (/usr/bin/code), which has no display in this container and crashes.' \
         '' \
+        '# 0. tunnel/serve-web are full-CLI subcommands the remote-cli shim does not implement' \
+        '#    (it would treat "tunnel" as a filename to open) and they need no window socket.' \
+        '#    Hand them to the real /usr/bin/code, which dispatches them to its bundled CLI and' \
+        '#    runs fine headless. Use the absolute path -- calling `code` here would recurse' \
+        '#    into this wrapper.' \
+        'case "$1" in' \
+        '  tunnel|serve-web) exec /usr/bin/code "$@" ;;' \
+        'esac' \
+        '' \
         '# 1. Locate the remote CLI shim. There is one per installed VS Code build and the' \
         '#    path embeds a build hash, so pick the newest to survive VS Code updates. The' \
         '#    -x check turns a found-but-not-executable match into the friendly error below' \
@@ -238,12 +247,17 @@ RUN mkdir -p /home/vscode/.local/bin \
         '#    newest is your current window: prefer the newest socket that still accepts a' \
         '#    connection, falling back to older ones. If none is reachable, keep whatever the' \
         '#    environment provided so socket-less subcommands (code --version, etc.) still work.' \
+        '#    LIMITATION: "newest socket" is the current window only with a single window/tab' \
+        '#    open. With multiple windows, or after an extension-host reload, files may open in' \
+        '#    another window -- serve-web exposes no API to target a specific window, so this is' \
+        '#    the best heuristic available.' \
         'ipc_live() {' \
         '  [ -S "$1" ] || return 1' \
         '  # Best-effort connect probe to skip sockets whose window has gone away. socat is' \
-        '  # optional here: if it is not installed, treat an existing socket as usable.' \
+        '  # optional here: if it is not installed, treat an existing socket as usable. The' \
+        '  # timeout bounds the connect so a pathological socket can never wedge `code`.' \
         '  command -v socat >/dev/null 2>&1 || return 0' \
-        '  socat -u OPEN:/dev/null UNIX-CONNECT:"$1" >/dev/null 2>&1' \
+        '  timeout 2 socat -u OPEN:/dev/null UNIX-CONNECT:"$1" >/dev/null 2>&1' \
         '}' \
         'for sock in $(ls -t /tmp/vscode-ipc-*.sock 2>/dev/null); do' \
         '  if ipc_live "$sock"; then' \
