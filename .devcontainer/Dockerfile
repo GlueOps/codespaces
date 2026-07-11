@@ -199,7 +199,10 @@ RUN curl -sS https://downloads.1password.com/linux/keys/1password.asc | \
   sudo gpg --dearmor --output /usr/share/debsig/keyrings/AC2D62742012EA22/debsig.gpg && \
   sudo apt update && sudo apt install 1password-cli
 
-RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colorTheme": "VS Code Dark"}' > /home/vscode/.vscode-server/data/Machine/settings.json
+# Disable VS Code Workspace Trust so folders (e.g. /workspaces/glueops) always open
+# trusted -- no "Do you trust the authors..." prompt blocking terminals/tasks on launch.
+# These are ephemeral CDEs that only ever open the user's own GlueOps repos.
+RUN mkdir -p /home/vscode/.vscode-server/data/Machine/ && echo '{"workbench.colorTheme": "VS Code Dark", "security.workspace.trust.enabled": false}' > /home/vscode/.vscode-server/data/Machine/settings.json
 
 # The apt `code` package installs the desktop (Electron) binary at /usr/bin/code.
 # In these headless serve-web/tunnel sessions there is no X display, so running
