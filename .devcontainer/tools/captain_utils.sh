@@ -69,24 +69,57 @@ handle_platform_upgrades() {
         echo "chosen version: $version for $chart_name"
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
-        
-        set -x
+
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template' and drop '--allow-unreleased'):"
+        echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
-        set +x
-        
+
         if ! gum confirm "Apply upgrade"; then
             return
         fi
-        
-        # Running helm diff command
-        gum style --bold --foreground 212 "The following commands will be executed:"
-        
-        set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace 
-        set +x
-        return 
+
+        helm_upgrade_cmd="helm upgrade --install \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --create-namespace"
+        gum style --bold --foreground 212 "The following commands will be executed (copy to re-run or debug):"
+        echo "$helm_upgrade_cmd"
+        eval "$helm_upgrade_cmd"
+        return
     done
+}
+
+# Installs the kube-prometheus-stack CRDs, replicating the kube-prometheus-stack-crds
+# ArgoCD app from platform-helm-chart-platform. The chart version comes from
+# VERSIONS/glueops.yaml (kube_prometheus_stack_version) like the other components.
+# Server-side apply is used because the prometheus CRDs are too large for client-side
+# apply (mirrors the app's Replace=true).
+install_kube_prometheus_stack_crds() {
+    local kps_version crds_ref crds_dir=""
+    if [ "$environment" = "production" ]; then
+        kps_version=$(yq '.versions[] | select(.name == "kube_prometheus_stack_version") | .version' VERSIONS/glueops.yaml)
+    else
+        kps_version=$(curl -sf "https://raw.githubusercontent.com/GlueOps/platform-helm-chart-platform/main/templates/application-kube-prometheus-stack-crds.yaml" | yq '.spec.source.targetRevision' | sed 's/^kube-prometheus-stack-//')
+    fi
+    if [ -z "$kps_version" ]; then
+        gum style --bold --foreground 196 "❌ kube_prometheus_stack_version not found in VERSIONS/glueops.yaml. Re-run terraform with an updated terraform-module-cloud-multy-prerequisites to regenerate it."
+        return 1
+    fi
+    crds_ref="kube-prometheus-stack-${kps_version}"
+    local install_cmds
+    install_cmds=$(cat <<EOF
+crds_dir=\$(mktemp -d) &&
+GIT_TERMINAL_PROMPT=0 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$crds_ref" --filter=blob:none --sparse https://github.com/prometheus-community/helm-charts.git "\$crds_dir" &&
+git -C "\$crds_dir" sparse-checkout set --no-cone charts/kube-prometheus-stack/charts/crds/crds &&
+kubectl apply --server-side --force-conflicts -R -f "\$crds_dir/charts/kube-prometheus-stack/charts/crds/crds" &&
+rm -rf "\$crds_dir"
+EOF
+)
+    gum style --bold --foreground 212 "Installing kube-prometheus-stack CRDs (${crds_ref}) using the following commands (copy to re-run or debug):"
+    echo "$install_cmds"
+    if ! eval "$install_cmds"; then
+        if [ -d "$crds_dir" ]; then rm -rf "$crds_dir"; fi
+        gum style --bold --foreground 196 "❌ kube-prometheus-stack CRD install failed."
+        return 1
+    fi
 }
 
 handle_argocd() {
@@ -129,35 +162,31 @@ handle_argocd() {
             return
         fi
         
-        set -x
+        gum style --bold --foreground 212 "Running diff with the following command (copy to re-run or debug, e.g. swap 'diff --color upgrade' for 'template' and drop '--allow-unreleased'):"
+        echo "$helm_diff_cmd"
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
-        set +x
-        
+
         if ! gum confirm "Apply upgrade"; then
             return
         fi
-        
-        # Running helm diff command
-        gum style --bold --foreground 212 "The following commands will be executed:"
-        
+
         # New: Execute pre_commands if defined
         if [ -n "$pre_commands" ] && [ -n "$chosen_crd_version" ]; then
-            gum style --bold --foreground 212 "Executing pre-commands for $component:"
-            set -x
-            eval "$pre_commands"
-            if [ $? -ne 0 ]; then
-                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting diff."
-                set +x
+            gum style --bold --foreground 212 "Executing pre-commands for $component (copy to re-run or debug):"
+            echo "$pre_commands"
+            # The tested condition suspends set -e so failures land in the retry path below
+            if ! eval "$pre_commands" || ! install_kube_prometheus_stack_crds; then
+                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting upgrade."
                 continue # Allow user to retry or go back
             fi
-            set +x
             gum style --bold --foreground 212 "✅ Pre-commands complete."
         fi
-        set -x
-        helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file"  -n "$namespace" --create-namespace --skip-crds
-        set +x
-        return 
+        helm_upgrade_cmd="helm upgrade --install \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -n \"$namespace\" --create-namespace --skip-crds"
+        gum style --bold --foreground 212 "The following commands will be executed (copy to re-run or debug):"
+        echo "$helm_upgrade_cmd"
+        eval "$helm_upgrade_cmd"
+        return
     done
 
 }
