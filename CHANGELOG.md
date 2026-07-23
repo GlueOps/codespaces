@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.149.0](https://github.com/GlueOps/codespaces/compare/v0.148.0...v0.149.0) (2026-07-23)
+
+
+### Features
+
+* update hashicorp/setup-packer to v3.4.0 #minor ([#528](https://github.com/GlueOps/codespaces/issues/528)) ([eab7f33](https://github.com/GlueOps/codespaces/commit/eab7f338caa489b2d30fbe35f40c7ce671404786))
+
 ## [0.148.0](https://github.com/GlueOps/codespaces/compare/v0.147.0...v0.148.0) (2026-07-11)
 
 
