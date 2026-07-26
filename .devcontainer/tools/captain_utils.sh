@@ -6,15 +6,117 @@ set -e
 set -u
 set -o pipefail
 
+# --- Flow mode infrastructure ---
+FLOW_MODE=false
+FLOW_QUEUE=()
+# Use a temp file for FLOW_INDEX so it persists across subshells created by $()
+FLOW_INDEX_FILE=$(mktemp)
+echo 0 > "$FLOW_INDEX_FILE"
+trap 'rm -f "$FLOW_INDEX_FILE"' EXIT
+
+_flow_get_index() { cat "$FLOW_INDEX_FILE"; }
+_flow_set_index() { echo "$1" > "$FLOW_INDEX_FILE"; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --flow)
+            if [[ $# -lt 2 ]] || [[ -z "$2" ]]; then
+                echo "Error: --flow requires a comma-separated queue argument" >&2
+                exit 1
+            fi
+            FLOW_MODE=true
+            IFS=',' read -r -a FLOW_QUEUE <<< "$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Wrapper for gum choose. In flow mode, consumes next queue value as 1-based index.
+# In interactive mode, shows indexed options and strips index prefix from result.
+flow_choose() {
+    local options=("$@")
+    if [ "$FLOW_MODE" = true ]; then
+        local flow_index=$(_flow_get_index)
+        if [ "$flow_index" -ge "${#FLOW_QUEUE[@]}" ]; then
+            echo "Flow complete." >&2
+            exit 1
+        fi
+        local idx="${FLOW_QUEUE[$flow_index]}"
+        _flow_set_index $((flow_index + 1))
+        if ! [[ "$idx" =~ ^[0-9]+$ ]] || [ "$idx" -lt 1 ] || [ "$idx" -gt "${#options[@]}" ]; then
+            echo "Invalid flow index '$idx'. Valid range: 1-${#options[@]} for options: ${options[*]}" >&2
+            exit 1
+        fi
+        local selected="${options[$((idx - 1))]}"
+        echo "[flow] Selected: $selected" >&2
+        echo "$selected"
+    else
+        local indexed_options=()
+        for i in "${!options[@]}"; do
+            indexed_options+=("$((i + 1)). ${options[$i]}")
+        done
+        local choice
+        choice=$(gum choose "${indexed_options[@]}")
+        # Strip the "N. " prefix
+        echo "$choice" | sed 's/^[0-9]*\. //'
+    fi
+}
+
+# Wrapper for gum confirm. In flow mode, consumes next queue value (y/n).
+flow_confirm() {
+    local prompt="$1"
+    if [ "$FLOW_MODE" = true ]; then
+        local flow_index=$(_flow_get_index)
+        if [ "$flow_index" -ge "${#FLOW_QUEUE[@]}" ]; then
+            echo "Flow complete." >&2
+            exit 0
+        fi
+        local val="${FLOW_QUEUE[$flow_index]}"
+        _flow_set_index $((flow_index + 1))
+        echo "[flow] Confirm '$prompt': $val" >&2
+        if [ "$val" = "y" ] || [ "$val" = "Y" ]; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        gum confirm "$prompt"
+    fi
+}
+
+# Wrapper for gum pager. In flow mode, uses cat to avoid blocking.
+flow_pager() {
+    if [ "$FLOW_MODE" = true ]; then
+        cat
+    else
+        gum pager
+    fi
+}
+
 run_prerequisite_commands(){
+    helm repo add argo https://argoproj.github.io/argo-helm
+    helm repo add glueops-platform https://helm.gpkg.io/platform
+    helm repo add glueops-service https://helm.gpkg.io/service
+    helm repo add glueops-project-template https://helm.gpkg.io/project-template
+    helm repo add incubating-glueops-platform https://incubating-helm.gpkg.io/platform
+    helm repo add incubating-glueops-service https://incubating-helm.gpkg.io/service
+    helm repo add incubating-glueops-project-template https://incubating-helm.gpkg.io/project-template
+    helm repo add projectcalico https://docs.tigera.io/calico/charts
     helm repo update
+    if ! helm plugin list | grep -q '^diff'; then
+        helm plugin install https://github.com/databus23/helm-diff
+    fi
 }
 
 check_codespace_version_match(){
     codespace_version=`yq '.versions[] | select(.name == "codespace_version") | .version' VERSIONS/glueops.yaml`
     if [ "$codespace_version" != $VERSION ]; then
         gum style --foreground 196 --bold "Current codespace version doesn't match with the desired: ${codespace_version}"
-        if ! gum confirm "Confirmation"; then
+        if ! flow_confirm "Confirmation"; then
             return 1
         fi
     fi
@@ -60,7 +162,7 @@ handle_platform_upgrades() {
             gum style --foreground 196 --bold "No Overrides.yaml detected"
             overrides_file="platform.yaml"
         fi
-        version=$(gum choose "${versions[@]}" "Back")
+        version=$(flow_choose "${versions[@]}" "Back") || exit 0
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
@@ -71,11 +173,11 @@ handle_platform_upgrades() {
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -f \"$overrides_file\" -n \"$namespace\" --allow-unreleased"
         
         set -x
-        eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
+        eval "$helm_diff_cmd" | flow_pager # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
         set +x
         
-        if ! gum confirm "Apply upgrade"; then
+        if ! flow_confirm "Apply upgrade"; then
             return
         fi
         
@@ -105,7 +207,7 @@ handle_argocd() {
         target_file="argocd.yaml"
         namespace="glueops-core"
         chart_name="argo/argo-cd"
-        version=$(gum choose "${versions[@]}" "Back")
+        version=$(flow_choose "${versions[@]}" "Back") || exit 0
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
@@ -122,7 +224,7 @@ handle_argocd() {
         else
             local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
         fi
-        chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
+        chosen_crd_version=$(flow_choose "${argocd_crd_versions[@]}" "Back") || exit 0
         pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
         # Check if user wants to go back
         if [ "$chosen_crd_version" = "Back" ]; then
@@ -130,11 +232,11 @@ handle_argocd() {
         fi
         
         set -x
-        eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
+        eval "$helm_diff_cmd" | flow_pager # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
         set +x
         
-        if ! gum confirm "Apply upgrade"; then
+        if ! flow_confirm "Apply upgrade"; then
             return
         fi
         
@@ -164,6 +266,19 @@ handle_argocd() {
 
 handle_calico_upgrades() {
     calico_version=`yq '.versions[] | select(.name == "calico_helm_chart_version") | .version' VERSIONS/glueops.yaml`
+    
+    helm repo add projectcalico https://docs.tigera.io/calico/charts
+    helm repo update
+
+    set -x
+    helm diff --color upgrade calico projectcalico/tigera-operator --version "${calico_version}" --namespace tigera-operator -f calico.yaml --allow-unreleased | flow_pager
+    gum style --bold --foreground 212 "✅ Diff complete."
+    set +x
+
+    if ! flow_confirm "Apply calico upgrade"; then
+        return
+    fi
+
     remove_daemonset='kubectl delete daemonset -n kube-system aws-node'
     gum style --bold --foreground 196 "Removing eks daemonset" 
     set -x
@@ -171,9 +286,7 @@ handle_calico_upgrades() {
     
     gum style --bold --foreground 196 "Deploying calico helm chart ${calico_version}"
     
-    helm repo add projectcalico https://docs.tigera.io/calico/charts
-    helm repo update
-    helm upgrade --install calico projectcalico/tigera-operator --version ${calico_version} --namespace tigera-operator -f calico.yaml --create-namespace
+    helm upgrade --install calico projectcalico/tigera-operator --version "${calico_version}" --namespace tigera-operator -f calico.yaml --create-namespace
     
     set +x
 
@@ -195,7 +308,8 @@ handle_kubernetes_version() {
 
 
 handle_aws_options() {
-    local aws_component=$(gum choose "calico" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit")
+    local aws_component
+    aws_component=$(flow_choose "calico" "eks-addons" "upgrade-eks-nodepools" "upgrade-kubernetes" "Exit") || exit 0
     # Handle exit option
     if [ "$aws_component" = "Exit" ]; then
         echo "Goodbye!"
@@ -227,7 +341,7 @@ handle_inspect_pods() {
 
 show_production(){
     while true; do
-        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
+        component=$(flow_choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit") || exit 0
 
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -261,7 +375,7 @@ show_production(){
 
 show_dev(){
     while true; do
-        component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
+        component=$(flow_choose "argocd" "glueops-platform" "aws" "Exit") || exit 0
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -290,7 +404,7 @@ run_prerequisite_commands
 
 while true; do
     # Show main menu
-    environment=$(gum choose "dev" "production" "Exit")
+    environment=$(flow_choose "dev" "production" "Exit") || exit 0
 
     # Handle exit option
     if [ "$environment" = "Exit" ]; then
