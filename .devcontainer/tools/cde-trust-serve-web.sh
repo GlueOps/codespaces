@@ -59,6 +59,13 @@ set -u
 SW="$HOME/.vscode/cli/serve-web"
 SHIM_MARK='cde-trust-serve-web shim'
 
+# Everything here assumes HOME=/home/vscode — where the image bakes the server and where
+# serve-web downloads it. If the container runs as a uid without that home (the image is
+# built for uid 1337 / user `vscode`), the baked+shimmed server isn't found and the trust
+# prompt silently returns. Warn loudly so that's easy to spot rather than a mystery.
+[ "$HOME" = "/home/vscode" ] || \
+    echo "cde-trust-serve-web: WARNING: HOME=$HOME (expected /home/vscode); shim may not take effect" >&2
+
 # Remove any temp file we might leave behind if interrupted mid-write (PID-scoped).
 trap 'rm -f "$SW"/*/bin/code-server.tmp."$$" 2>/dev/null || true' EXIT
 
@@ -98,7 +105,10 @@ if ! server_present; then
     dl=$!
     port=""
     for _ in $(seq 1 30); do
-        port="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "$log" 2>/dev/null | head -1 | grep -oE '[0-9]+$')"
+        # Parse the port from serve-web's "Web UI available at http://<host>:<port>" banner.
+        # (If a VS Code version changes this wording, port stays empty -> download is skipped
+        #  -> the build assertion fails / runtime no-ops. See the "IF THIS BREAKS" block.)
+        port="$(grep -oE 'http://(127\.0\.0\.1|localhost):[0-9]+' "$log" 2>/dev/null | head -1 | grep -oE '[0-9]+$')"
         [ -n "$port" ] && break
         sleep 1
     done
@@ -110,6 +120,9 @@ if ! server_present; then
             sleep 1
         done
     fi
+    # Killing the timeout parent SIGTERMs `code serve-web`, which supervises and tears down
+    # the node server it spawned — verified in a fresh image that no serve-web/node process
+    # is left behind, so a group-kill isn't needed here.
     kill "$dl" 2>/dev/null || true
     wait "$dl" 2>/dev/null || true
     rm -f "$log"
