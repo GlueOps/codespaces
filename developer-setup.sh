@@ -369,6 +369,10 @@ dev() {
 
     if [ -n "$CDE_TOKEN" ]; then
         AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 tunnels.glueopshosted.com
+        # Disable VS Code Workspace Trust so folders open without the "Do you trust the
+        # authors…" prompt (code serve-web is web-mode — see cde-trust-serve-web for why the
+        # usual settings don't work). Non-fatal, and a no-op on older images without the tool.
+        sudo docker exec "$CONTAINER_NAME" bash -lc 'command -v cde-trust-serve-web >/dev/null 2>&1 && cde-trust-serve-web || true' || true
         sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CDE_TOKEN"
     else
         sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
