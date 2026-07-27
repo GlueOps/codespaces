@@ -289,6 +289,11 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
 # faster first connection. Only affects the `code serve-web` path (not `code tunnel`).
 # The tool is intentionally non-fatal (dev() re-runs it at runtime), so assert here that the
 # shim actually landed — the build MUST fail if the pre-bake didn't produce a shimmed server.
+#
+# IF THIS `RUN` FAILS: the pre-bake didn't produce a shimmed bin/code-server — usually a VS
+# Code version bump changed the server. See the "IF THIS BREAKS" troubleshooting block in
+# .devcontainer/tools/cde-trust-serve-web.sh for the exact checks (launcher shape, the flag,
+# the workbench gate) and how to fix it.
 RUN cde-trust-serve-web \
     && grep -q 'cde-trust-serve-web shim' /home/vscode/.vscode/cli/serve-web/*/bin/code-server
 
