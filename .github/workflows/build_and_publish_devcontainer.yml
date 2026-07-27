@@ -33,6 +33,12 @@ jobs:
       - name: Generate Variables for Tags
         uses: rlespinasse/github-slug-action@e6f261660910b273384c5c42b17a0217881b217a # v5.6.0
 
+      - name: Set build variables
+        id: vars
+        run: |
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          echo "build_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
       - name: Build and run dev container task
         uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3
         with:
@@ -41,3 +47,7 @@ jobs:
           push: always
         env:
           VERSION: "${{ env.GITHUB_REF_SLUG }}"
+          COMMIT_SHA: "${{ github.sha }}"
+          SHORT_SHA: "${{ steps.vars.outputs.short_sha }}"
+          BUILD_TIMESTAMP: "${{ steps.vars.outputs.build_timestamp }}"
+          GIT_REF: "${{ github.ref_name }}"

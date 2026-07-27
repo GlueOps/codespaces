@@ -3,10 +3,19 @@
 {
 	"name": "Ubuntu",
 	"build": {
-		"dockerfile": "Dockerfile"
+		"dockerfile": "Dockerfile",
+		// Build metadata forwarded to the Dockerfile as build args, sourced from
+		// the runner environment set in build_and_publish_devcontainer.yml.
+		// Default to empty locally (Dockerfile ARGs fall back to UNKNOWN).
+		"args": {
+			"COMMIT_SHA": "${localEnv:COMMIT_SHA}",
+			"SHORT_SHA": "${localEnv:SHORT_SHA}",
+			"BUILD_TIMESTAMP": "${localEnv:BUILD_TIMESTAMP}",
+			"GIT_REF": "${localEnv:GIT_REF}"
+		}
 		// Update 'VARIANT' to pick an Ubuntu version: jammy / ubuntu-22.04, focal / ubuntu-20.04, bionic /ubuntu-18.04
 		// Use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon.
-	
+
 	},
 
 	// Set *default* container specific settings.json values on container create.
