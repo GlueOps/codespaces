@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.153.0](https://github.com/GlueOps/codespaces/compare/v0.152.0...v0.153.0) (2026-07-27)
+
+
+### Features
+
+* open a terminal at startup instead of the welcome tab ([ed8f3e1](https://github.com/GlueOps/codespaces/commit/ed8f3e1371037d674ead52815b1f8a7ceda2209d))
+
+
+### Miscellaneous Chores
+
+* disable VS Code welcome tab on codespace launch ([9e380f3](https://github.com/GlueOps/codespaces/commit/9e380f38dec1d237a7b7ffccadcd6171c897cb48))
+
 ## [0.152.0](https://github.com/GlueOps/codespaces/compare/v0.151.0...v0.152.0) (2026-07-27)
 
 
