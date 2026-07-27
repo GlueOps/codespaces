@@ -13,8 +13,9 @@
 	"customizations": {
 		"vscode": {
 			"settings": {
-				// Don't open the Welcome / Get Started tab on launch.
-				"workbench.startupEditor": "none",
+				// Open a terminal in the editor area at startup instead of the
+				// Welcome / Get Started tab.
+				"workbench.startupEditor": "terminal",
 				// Don't auto-open extension walkthroughs (e.g. "Get Started with Codespaces").
 				"workbench.welcomePage.walkthroughs.openOnInstall": false
 			}
