@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.149.0](https://github.com/GlueOps/codespaces/compare/v0.148.0...v0.149.0) (2026-07-27)
+
+
+### Features
+
+* load env vars into dev container via --env-file #minor ([7854331](https://github.com/GlueOps/codespaces/commit/78543311b3502d6b37e93b64750cfcddc7714d63))
+* update hashicorp/setup-packer to v3.4.0 #minor ([#528](https://github.com/GlueOps/codespaces/issues/528)) ([eab7f33](https://github.com/GlueOps/codespaces/commit/eab7f338caa489b2d30fbe35f40c7ce671404786))
+
+
+### Miscellaneous Chores
+
+* **fallback:** update docker/login-action ([45ffd5f](https://github.com/GlueOps/codespaces/commit/45ffd5fd8bf1740aa4701f84a8a544e4fba3772b))
+* **patch:** update argoproj/argo-cd to v3.3.12 #patch ([94a9227](https://github.com/GlueOps/codespaces/commit/94a9227164cf950a457f15086f9afa04fa25ac35))
+* **patch:** update databus23/helm-diff to v3.15.10 #patch ([bc5a38a](https://github.com/GlueOps/codespaces/commit/bc5a38aab0a2a7a9026115585d0adb5159731384))
+* **patch:** update opentofu/opentofu to v1.11.11 #patch ([aad2f99](https://github.com/GlueOps/codespaces/commit/aad2f99ada56d5f421e925c50f2b20265a73772d))
+
 ## [0.148.0](https://github.com/GlueOps/codespaces/compare/v0.147.0...v0.148.0) (2026-07-11)
 
 
