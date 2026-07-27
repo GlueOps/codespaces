@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.151.0](https://github.com/GlueOps/codespaces/compare/v0.150.0...v0.151.0) (2026-07-27)
+
+
+### Features
+
+* bake the shimmed serve-web server into the image at build ([6461e76](https://github.com/GlueOps/codespaces/commit/6461e76fd69f9891a514030998f71a513a144c5c))
+* disable VS Code Workspace Trust for code serve-web ([1218b74](https://github.com/GlueOps/codespaces/commit/1218b749a606083457dfa0a534d914054bc0cbc7))
+* front-load the server download so first connect is prompt-free (single dev) ([3aab47c](https://github.com/GlueOps/codespaces/commit/3aab47c43b3ea94b14035060359edd40c79c46a5))
+
+
+### Bug Fixes
+
+* address final review nits on the trust shim ([ca3c4e1](https://github.com/GlueOps/codespaces/commit/ca3c4e13b860ffd5de4a15b5eae72b43a0e1f36a))
+* trigger serve-web server download before patching ([6962bd7](https://github.com/GlueOps/codespaces/commit/6962bd7fb438b6807e370c1d2751db2e1dc55fff))
+
+
+### Documentation
+
+* add inline "IF THIS BREAKS" troubleshooting for the trust shim ([85accfd](https://github.com/GlueOps/codespaces/commit/85accfdc2c2586cac53e33e78a0af6394c21d449))
+
+
+### Code Refactoring
+
+* use the native --disable-workspace-trust flag via a launcher shim ([769080c](https://github.com/GlueOps/codespaces/commit/769080cc9c9ff9209888b1dd283905c40865d30b))
+
 ## [0.150.0](https://github.com/GlueOps/codespaces/compare/v0.149.0...v0.150.0) (2026-07-27)
 
 
