@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.150.0](https://github.com/GlueOps/codespaces/compare/v0.149.0...v0.150.0) (2026-07-27)
+
+
+### Features
+
+* add cde-init CDE bootstrap (gh auth, repo clone, AutoGlue) ([db221fe](https://github.com/GlueOps/codespaces/commit/db221fe0a6381e49f819c42090111b5242a741c0))
+
+
+### Bug Fixes
+
+* harden cde-init/cde-boot bootstrap ([e0fea27](https://github.com/GlueOps/codespaces/commit/e0fea27a2ab935dd31299669b78063cea1482bfd))
+
+
+### Miscellaneous Chores
+
+* **fallback:** update actions/checkout ([1bdea69](https://github.com/GlueOps/codespaces/commit/1bdea695359b14567dd41459b2bf014bc3e36ae5))
+
 ## [0.149.0](https://github.com/GlueOps/codespaces/compare/v0.148.0...v0.149.0) (2026-07-27)
 
 
