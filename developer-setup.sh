@@ -75,8 +75,8 @@ gum --version
 sudo tee /etc/systemd/system/launch-dev.service > /dev/null <<'EOF'
 [Unit]
 Description=Call dev function from .glueopsrc
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target docker.service cloud-final.service
+Wants=network-online.target cloud-final.service
 
 [Service]
 Type=oneshot
@@ -282,6 +282,15 @@ dev() {
         gum style --padding "0 1" --foreground=226 \
             "🧼 Creating and starting new container '$CONTAINER_NAME' with tag $(gum style --bold "$CONTAINER_TAG_TO_USE")..."
 
+        # Guarantee the env-file exists so `docker run --env-file` never errors.
+        # This is idempotent and non-truncating: if cloud-init (or an operator)
+        # already wrote KEY=VALUE lines here, they are preserved; if the file is
+        # absent it is created empty (docker treats an empty file as zero vars).
+        # The SAME docker run command below works whether the file is empty or populated.
+        sudo mkdir -p /etc/glueops
+        sudo touch /etc/glueops/codespace.env
+        sudo chmod 600 /etc/glueops/codespace.env
+
         if ! gum spin --spinner dot --title "Creating container '$CONTAINER_NAME'..." --show-output -- \
             sudo docker run -itd --name "$CONTAINER_NAME" \
                 --net=host \
@@ -294,6 +303,7 @@ dev() {
                 -v /workspaces/glueops:/workspaces/glueops \
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
+                --env-file /etc/glueops/codespace.env \
                 -w /workspaces/glueops \
                 "ghcr.repo.gpkg.io/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
              gum style --padding "0 1" --foreground=196 --bold \
