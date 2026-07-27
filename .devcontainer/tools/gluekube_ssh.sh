@@ -842,6 +842,11 @@ kubeconfig_and_port_forward() {
         local held_pids
         held_pids=$(port6443_pids)
         if [[ -n "$held_pids" ]]; then
+            # Show what we're about to kill so it isn't a silent SIGKILL
+            while read -r _p; do
+                [[ -z "$_p" ]] && continue
+                echo "  killing PID $_p ($(ps -o comm= -p "$_p" 2>/dev/null || echo '?'))"
+            done <<< "$held_pids"
             echo "$held_pids" | xargs -r kill -9 2>/dev/null || true
             if port6443_in_use && command -v sudo >/dev/null 2>&1; then
                 echo "$held_pids" | xargs -r sudo -n kill -9 2>/dev/null || true
@@ -858,14 +863,19 @@ kubeconfig_and_port_forward() {
         fi
     fi
 
-    # Nuke existing kubeconfig and fetch a fresh one from the master
+    # Fetch a fresh kubeconfig into a temp file first, and only replace
+    # ~/.kube/config once we know it succeeded. A failed refresh (bastion
+    # unreachable, key not loaded, sudo denied) then leaves the user's existing
+    # kubeconfig intact instead of nuking it and leaving them with nothing.
     mkdir -p ~/.kube
-    rm -f ~/.kube/config
+    local kube_tmp
+    kube_tmp=$(mktemp)
     echo "Fetching fresh kubeconfig from $hostname..."
 
     if ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
         "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip \
-        'sudo cat /etc/kubernetes/admin.conf'" > ~/.kube/config 2>/dev/null && [[ -s ~/.kube/config ]]; then
+        'sudo cat /etc/kubernetes/admin.conf'" > "$kube_tmp" 2>/dev/null && [[ -s "$kube_tmp" ]]; then
+        mv "$kube_tmp" ~/.kube/config
         # Point the kubeconfig at the local port-forward
         if kubectl config set-cluster "kubernetes" --server=https://127.0.0.1:6443 >/dev/null 2>&1; then
             gum style --foreground 82 "✓ Fresh kubeconfig saved (server → https://127.0.0.1:6443)"
@@ -874,8 +884,8 @@ kubeconfig_and_port_forward() {
             gum style --foreground 208 "⚠️  Could not update server URL (kubectl not found?)"
         fi
     else
-        rm -f ~/.kube/config
-        gum style --foreground 196 "✗ Failed to fetch kubeconfig - aborting"
+        rm -f "$kube_tmp"
+        gum style --foreground 196 "✗ Failed to fetch kubeconfig - aborting (existing ~/.kube/config left untouched)"
         return 1
     fi
 
@@ -905,7 +915,10 @@ kubeconfig_and_port_forward() {
     local fwd_elapsed=$(( $(date +%s) - fwd_start ))
 
     echo ""
-    if [[ $fwd_rc -ne 0 && $fwd_elapsed -lt 4 ]]; then
+    # ssh exits 130 (SIGINT) / 143 (SIGTERM) on a clean Ctrl+C - never a failure,
+    # even if the user cancels within the first few seconds. Only a quick,
+    # non-signal, non-zero exit means the tunnel could not be set up.
+    if [[ $fwd_rc -ne 0 && $fwd_rc -ne 130 && $fwd_rc -ne 143 && $fwd_elapsed -lt 4 ]]; then
         gum style --foreground 196 "✗ Port forward failed to start (ssh exit $fwd_rc after ${fwd_elapsed}s)."
         echo "Could not establish the tunnel. If local port 6443 is in use:"
         ss -tanp 2>/dev/null | awk 'NR==1 || $4 ~ /:6443$/' || true
@@ -1591,12 +1604,12 @@ main() {
         case "$1" in
             --profile)
                 arg_profile="${2:-}"
-                [[ -z "$arg_profile" ]] && { echo "Error: --profile requires a value" >&2; exit 1; }
+                [[ -z "$arg_profile" || "$arg_profile" == -* ]] && { echo "Error: --profile requires a value" >&2; exit 1; }
                 shift 2
                 ;;
             --cluster)
                 arg_cluster="${2:-}"
-                [[ -z "$arg_cluster" ]] && { echo "Error: --cluster requires a value" >&2; exit 1; }
+                [[ -z "$arg_cluster" || "$arg_cluster" == -* ]] && { echo "Error: --cluster requires a value" >&2; exit 1; }
                 shift 2
                 ;;
             --kubectl)
@@ -1605,7 +1618,7 @@ main() {
                 ;;
             --org)
                 arg_org="${2:-}"
-                [[ -z "$arg_org" ]] && { echo "Error: --org requires a value" >&2; exit 1; }
+                [[ -z "$arg_org" || "$arg_org" == -* ]] && { echo "Error: --org requires a value" >&2; exit 1; }
                 shift 2
                 ;;
             -h|--help)
