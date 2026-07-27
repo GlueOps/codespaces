@@ -1497,14 +1497,27 @@ headless_quick_connect() {
     fi
 
     if [[ -n "$org_filter" ]]; then
+        # Explicit --org: query only that org
         org_entries=$(echo "$org_entries" | awk -F'|' -v o="$org_filter" '$2==o')
         if [[ -z "$org_entries" ]]; then
             gum style --foreground 196 "✗ Org '$org_filter' not found"
             return 1
         fi
+    else
+        # Fast path: the cluster FQDN encodes its org - e.g. cluster
+        # "nonprod.foobar.onglueops.com" lives in org "foobar.onglueops.com"
+        # (the cluster name minus its first DNS label). Try that org FIRST so
+        # the common case is a single /clusters call; the loop below still
+        # falls through to the remaining orgs if the convention doesn't hold.
+        local guess_org="${cluster_name#*.}"
+        if [[ -n "$guess_org" && "$guess_org" != "$cluster_name" ]]; then
+            org_entries=$(echo "$org_entries" | awk -F'|' -v o="$guess_org" \
+                '$2==o{print} $2!=o{buf[n++]=$0} END{for(i=0;i<n;i++) print buf[i]}')
+        fi
     fi
 
-    # Scan org(s) for a cluster whose name matches; first match wins
+    # Scan org(s) for a cluster whose name matches; first match wins (the
+    # derived org, if any, is tried first)
     local found_org_id="" found_cluster_id="" all_names=""
     local org_id org_name clusters match names
     while IFS='|' read -r org_id org_name; do
