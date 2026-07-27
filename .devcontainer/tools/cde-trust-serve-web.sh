@@ -20,7 +20,39 @@
 # startup — so to have the shim in place before that first connection (and avoid a one-time
 # prompt), we front-load the download here: briefly start serve-web on a local port and hit
 # it once (this is the same download that would happen on first connect, just moved earlier).
-# Called from developer-setup.sh's `dev` before `code serve-web` launches.
+#
+# WHERE THIS RUNS: (1) at IMAGE BUILD — .devcontainer/Dockerfile runs this and then asserts
+# the shim landed, so the build fails if it didn't; (2) at RUNTIME — developer-setup.sh's
+# `dev` calls it before `code serve-web` (a no-op when the baked server is already shimmed;
+# re-shims if a VS Code update pulled a new server).
+#
+# ─────────────────────────────────────────────────────────────────────────────────────────
+# IF THIS BREAKS (trust prompt returns, OR the Dockerfile build assertion fails): it almost
+# always means a VS Code version bump changed something below. Re-check these three facts
+# against the downloaded server at ~/.vscode/cli/serve-web/<hash>/ and update the matching
+# piece (or re-derive from the workbench source):
+#
+#   1. LAUNCHER SHAPE — we shim `bin/code-server`, which must still be a shell wrapper ending
+#      in `"$ROOT/node" ... "$ROOT/out/server-main.js" "$@"`.
+#        tail -3 ~/.vscode/cli/serve-web/*/bin/code-server.orig
+#      If the path/shape changed, update SW / the glob / the shim in this file.
+#
+#   2. THE FLAG STILL WORKS — server-main.js must still set enableWorkspaceTrust from the arg:
+#        grep -o 'enableWorkspaceTrust[^,]*' ~/.vscode/cli/serve-web/*/out/server-main.js
+#      Expect: enableWorkspaceTrust:!...args["disable-workspace-trust"]
+#
+#   3. THE WORKBENCH STILL GATES ON IT — web build must still short-circuit:
+#      isWorkspaceTrustEnabled = disableWorkspaceTrust ? false : <config>, and
+#      disableWorkspaceTrust   = !options.enableWorkspaceTrust
+#        f=~/.vscode/cli/serve-web/*/out/vs/workbench/workbench.web.main.internal.js
+#        grep -o 'isWorkspaceTrustEnabled(){[^}]*}' $f
+#        grep -o 'get disableWorkspaceTrust(){[^}]*}' $f
+#      If (2)/(3) changed, the whole flag approach may no longer apply — re-derive the lever.
+#
+# Ruled-out alternatives (don't waste time retrying these — verified not to work for
+# serve-web web mode): settings.json (User or Machine), product.json configurationDefaults,
+# and passing --disable-workspace-trust to `code serve-web` (the Rust CLI rejects it).
+# ─────────────────────────────────────────────────────────────────────────────────────────
 
 set -u
 
