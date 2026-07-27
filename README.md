@@ -17,6 +17,19 @@ devbox shell
 python --version
 ```
 
+## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`
+
+When a codespace container starts, `dev` runs a one-time bootstrap (`cde-boot`) driven by the `CDE_SETUP_SCRIPT` environment variable (supplied by the Slack bot via `/etc/glueops/codespace.env`):
+
+- **`cde-init`** (the default value) — authenticates GitHub from `GITHUB_TOKEN` (non-interactive; runs `gh auth setup-git` so `git`/private-repo clones work, and sets your git identity), clones `GLUEOPS_CDE_CLONE_REPO` into `/workspaces/glueops/<repo>` (public repos need no token), and seeds `gluekube_ssh` (AutoGlue) `prod`/`nonprod` profiles from `GLUEKUBE_SSH_AUTOGLUE_{PROD,NONPROD}_{URL,TOKEN}`.
+- **a command** — e.g. `curl setup.example.com | zsh` runs instead of `cde-init`.
+- **`base64:<encoded>`** — a base64-encoded script, for complex/multi-line setup (`<your script> | base64 -w0`).
+- **empty** — skip setup.
+
+Every step is best-effort and non-fatal; unconfigured inputs are skipped. It runs once per container (sentinel `~/.cde-init-done`); set `CDE_INIT_FORCE=1`, or just run `cde-init` / `cde-boot` again, to re-run. The tools live in `.devcontainer/tools/` (`cde-init.sh`, `cde-boot.sh`) and are installed to `/usr/local/bin` by the image build.
+
+Because the default GitHub auth is token-based, running `yolo` afterward is a smooth no-op (it detects the existing auth and skips the interactive browser login).
+
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
