@@ -16,21 +16,35 @@
 # So we shim that wrapper to append the native flag — a documented flag + a stable launcher
 # script, no patching of minified server code. Idempotent and non-fatal.
 #
-# Called from developer-setup.sh's `dev` before `code serve-web` launches. Deliberately does
-# NO network / download: it only shims a server that's already on disk. The serve-web server
-# is downloaded lazily on the first browser connection, so on a brand-new container the very
-# first connection still prompts once; every `dev` after that shims it and the prompt is gone.
+# `code serve-web` downloads the server LAZILY on the first browser connection, not at
+# startup — so to have the shim in place before that first connection (and avoid a one-time
+# prompt), we front-load the download here: briefly start serve-web on a local port and hit
+# it once (this is the same download that would happen on first connect, just moved earlier).
+# Called from developer-setup.sh's `dev` before `code serve-web` launches.
 
 set -u
 
 SW="$HOME/.vscode/cli/serve-web"
 SHIM_MARK='cde-trust-serve-web shim'
 
+# Remove any temp file we might leave behind if interrupted mid-write (PID-scoped).
+trap 'rm -f "$SW"/*/bin/code-server.tmp."$$" 2>/dev/null || true' EXIT
+
+# True when a fully-extracted server wrapper exists (ignore the transient "<hash>.staging" dir).
+server_present() {
+    local f
+    for f in "$SW"/*/bin/code-server; do
+        case "$f" in *".staging/"*) continue ;; esac
+        [ -f "$f" ] && return 0
+    done
+    return 1
+}
+
 # Wrap <server>/bin/code-server so the server is always launched with --disable-workspace-trust.
 shim_one() {
     local cs="$1" orig="$1.orig" tmp
     [ -f "$cs" ] || return 1
-    grep -q "$SHIM_MARK" "$cs" 2>/dev/null && return 0     # already shimmed
+    grep -qF "$SHIM_MARK" "$cs" 2>/dev/null && return 0     # already shimmed
     [ -f "$orig" ] || cp -p "$cs" "$orig"                  # preserve the real launcher once
     tmp="$cs.tmp.$$"
     cat > "$tmp" <<'SH'
@@ -43,11 +57,38 @@ SH
     mv "$tmp" "$cs"
 }
 
+# Front-load the lazy server download so there's a wrapper to shim before the first connection.
+if ! server_present; then
+    echo "cde-trust-serve-web: serve-web server not downloaded yet; front-loading it…"
+    log="$(mktemp)"
+    timeout 240 code serve-web --accept-server-license-terms --without-connection-token \
+        --host 127.0.0.1 --port 0 >"$log" 2>&1 &
+    dl=$!
+    port=""
+    for _ in $(seq 1 30); do
+        port="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "$log" 2>/dev/null | head -1 | grep -oE '[0-9]+$')"
+        [ -n "$port" ] && break
+        sleep 1
+    done
+    # The server downloads on the first HTTP hit — poke it until the wrapper lands.
+    if [ -n "$port" ]; then
+        for _ in $(seq 1 180); do
+            curl -fsS -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null || true
+            server_present && break
+            sleep 1
+        done
+    fi
+    kill "$dl" 2>/dev/null || true
+    wait "$dl" 2>/dev/null || true
+    rm -f "$log"
+    sleep 2   # let extraction/rename settle
+fi
+
 changed=0
 for cs in "$SW"/*/bin/code-server; do
-    case "$cs" in *".staging/"*) continue ;; esac   # skip the transient download dir
-    [ -f "$cs" ] || continue                          # no server downloaded yet -> nothing to do
-    grep -q "$SHIM_MARK" "$cs" 2>/dev/null && continue
+    case "$cs" in *".staging/"*) continue ;; esac
+    [ -f "$cs" ] || continue
+    grep -qF "$SHIM_MARK" "$cs" 2>/dev/null && continue
     if shim_one "$cs"; then
         echo "cde-trust-serve-web: shimmed $cs with --disable-workspace-trust"
         changed=1
@@ -55,6 +96,6 @@ for cs in "$SW"/*/bin/code-server; do
 done
 
 if [ "$changed" -eq 0 ]; then
-    echo "cde-trust-serve-web: no change (already shimmed, or server not downloaded yet)"
+    echo "cde-trust-serve-web: no change (already shimmed, or server unavailable)"
 fi
 exit 0
