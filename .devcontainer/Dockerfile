@@ -283,6 +283,15 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
     echo 'export PATH="$HOME/.local/bin:$HOME/.krew/bin:$PATH"' | tee -a /home/vscode/.zshrc /home/vscode/.bashrc && \
     chown vscode:vscode /home/vscode/.zshrc /home/vscode/.bashrc
 
+# Pre-download the `code serve-web` server and shim it to disable VS Code Workspace Trust
+# (cde-trust-serve-web) so the CDE's first browser connection is prompt-free with no runtime
+# download. Baking it here (vs front-loading at `dev` time) trades a bigger image for a
+# faster first connection. Only affects the `code serve-web` path (not `code tunnel`).
+# The tool is intentionally non-fatal (dev() re-runs it at runtime), so assert here that the
+# shim actually landed — the build MUST fail if the pre-bake didn't produce a shimmed server.
+RUN cde-trust-serve-web \
+    && grep -q 'cde-trust-serve-web shim' /home/vscode/.vscode/cli/serve-web/*/bin/code-server
+
 USER root
 RUN mkdir -p /home/vscode/.kube && chmod 0700 /home/vscode/.kube
 RUN chown -R vscode:vscode /home/vscode
