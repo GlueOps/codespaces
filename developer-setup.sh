@@ -357,10 +357,15 @@ dev() {
     
     [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
 
-    # Bootstrap the CDE once per container: runs CDE_SETUP_SCRIPT from the container env
-    # (the usual default value `cde-init` does gh auth + repo clone + AutoGlue setup).
-    # Non-fatal, and a no-op on older container images that predate cde-boot.
-    sudo docker exec "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
+    # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
+    # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
+    # older container images that predate cde-boot.
+    # Pass the env at EXEC time (not just the container's frozen create-time --env-file) so a
+    # later profile/secret edit reaches a forced re-run, and secrets are scoped to this exec.
+    ENVFILE_ARG=""
+    [ -f /etc/glueops/codespace.env ] && ENVFILE_ARG="--env-file /etc/glueops/codespace.env"
+    # shellcheck disable=SC2086 # ENVFILE_ARG must word-split into flag + path (or nothing)
+    sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
 
     if [ -n "$CDE_TOKEN" ]; then
         AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 tunnels.glueopshosted.com
