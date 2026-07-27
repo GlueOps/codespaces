@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.152.0](https://github.com/GlueOps/codespaces/compare/v0.151.0...v0.152.0) (2026-07-27)
+
+
+### Features
+
+* add quick-connect (fresh kubeconfig + master port-forward) to gluekube_ssh ([5ecd720](https://github.com/GlueOps/codespaces/commit/5ecd7201593c96bb1556110b554643811f630a09))
+
+
+### Bug Fixes
+
+* address review findings on gluekube_ssh quick-connect ([3aa1850](https://github.com/GlueOps/codespaces/commit/3aa1850c130ea6bdbeb49da941cb353acc505954))
+* random bastion port for kubectl_mode forward; drop dead port_forward helpers ([9e2f5d8](https://github.com/GlueOps/codespaces/commit/9e2f5d8085cd11eaa294bda4df0fe8dafed7174c))
+* robust port-6443 handling in gluekube_ssh quick-connect ([b7e68d2](https://github.com/GlueOps/codespaces/commit/b7e68d2bebc9a5883a1a1373db30cb3832ac3c0d))
+* use a random bastion-side port for the quick-connect tunnel ([b7467b3](https://github.com/GlueOps/codespaces/commit/b7467b3a5608742b5d7c6fc3333d74fb337e5563))
+
+
+### Code Refactoring
+
+* derive org from cluster FQDN to speed up headless resolution ([93856ff](https://github.com/GlueOps/codespaces/commit/93856ff712775ee84355f0ca71028022409d4f02))
+
 ## [0.151.0](https://github.com/GlueOps/codespaces/compare/v0.150.0...v0.151.0) (2026-07-27)
 
 
