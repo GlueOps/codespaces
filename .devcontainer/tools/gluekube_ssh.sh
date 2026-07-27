@@ -357,7 +357,7 @@ browse_infrastructure() {
                 
                 # Only add SSH/kubectl/kubeconfig options if bastion exists
                 if [[ -n "$bastion_ip" ]] && [[ -n "$servers" ]]; then
-                    menu_options+=("🔗 SSH to servers" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
+                    menu_options+=("🚀 Quick connect (fresh kubeconfig + port-forward)" "🔗 SSH to servers" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
                 fi
                 
                 # Add cluster action options (cluster exists in AutoGlue)
@@ -395,6 +395,9 @@ browse_infrastructure() {
                 fi
                 
                 case "$mode" in
+                    "🚀 Quick connect (fresh kubeconfig + port-forward)")
+                        quick_kubeconfig_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
+                        ;;
                     "🔗 SSH to servers")
                         ssh_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
@@ -544,7 +547,7 @@ kubectl_mode() {
     
     # Filter to only master nodes
     local master_servers
-    master_servers=$(echo "$servers" | grep "^MASTER|")
+    master_servers=$(echo "$servers" | grep "^MASTER|" || true)
     
     if [[ -z "$master_servers" ]]; then
         echo "No master nodes found"
@@ -609,7 +612,7 @@ kubectl_mode() {
         
         # Get the IP for this server - prefer private, fallback to public
         local server_line
-        server_line=$(echo "$master_servers" | grep "|$hostname|")
+        server_line=$(echo "$master_servers" | grep -F "|$hostname|" || true)
         local private_ip
         private_ip=$(echo "$server_line" | cut -d'|' -f5)
         local public_ip
@@ -720,7 +723,7 @@ kubeconfig_mode() {
     
     # Filter to only master nodes
     local master_servers
-    master_servers=$(echo "$servers" | grep "^MASTER|")
+    master_servers=$(echo "$servers" | grep "^MASTER|" || true)
     
     if [[ -z "$master_servers" ]]; then
         echo "No master nodes found"
@@ -745,7 +748,7 @@ kubeconfig_mode() {
     
     # Get the IP for this server - prefer private, fallback to public
     local server_line
-    server_line=$(echo "$master_servers" | grep "|$hostname|")
+    server_line=$(echo "$master_servers" | grep -F "|$hostname|" || true)
     local private_ip
     private_ip=$(echo "$server_line" | cut -d'|' -f5)
     local public_ip
@@ -784,6 +787,143 @@ kubeconfig_mode() {
         echo "✗ Failed to fetch kubeconfig"
     fi
     
+    echo ""
+    read -n 1 -s -r -p "Press any key to continue..." || true
+    echo ""
+}
+
+# Core quick-connect action (shared by the interactive menu and the headless
+# --cluster path): load keys, free port 6443, nuke ~/.kube/config, fetch a
+# fresh one from the given master, then foreground port-forward to it.
+# Blocks until the user hits Ctrl+C. Returns non-zero on setup failure.
+kubeconfig_and_port_forward() {
+    local bastion_ip="$1"
+    local hostname="$2"
+    local target_ip="$3"
+    local org_id="$4"
+    local bastion_key_id="$5"
+    local target_key_id="$6"
+
+    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
+
+    # Free port 6443 if something is already bound to it
+    if lsof -ti :6443 >/dev/null 2>&1; then
+        gum style --foreground 208 "⚠️  Port 6443 in use - freeing it..."
+        lsof -ti :6443 | xargs kill -9 2>/dev/null || true
+        sleep 2
+        if lsof -ti :6443 >/dev/null 2>&1; then
+            gum style --foreground 196 "✗ Failed to free port 6443"
+            return 1
+        fi
+    fi
+
+    # Nuke existing kubeconfig and fetch a fresh one from the master
+    mkdir -p ~/.kube
+    rm -f ~/.kube/config
+    echo "Fetching fresh kubeconfig from $hostname..."
+
+    if ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip \
+        'sudo cat /etc/kubernetes/admin.conf'" > ~/.kube/config 2>/dev/null && [[ -s ~/.kube/config ]]; then
+        # Point the kubeconfig at the local port-forward
+        if kubectl config set-cluster "kubernetes" --server=https://127.0.0.1:6443 >/dev/null 2>&1; then
+            gum style --foreground 82 "✓ Fresh kubeconfig saved (server → https://127.0.0.1:6443)"
+        else
+            gum style --foreground 82 "✓ Fresh kubeconfig saved to ~/.kube/config"
+            gum style --foreground 208 "⚠️  Could not update server URL (kubectl not found?)"
+        fi
+    else
+        rm -f ~/.kube/config
+        gum style --foreground 196 "✗ Failed to fetch kubeconfig - aborting"
+        return 1
+    fi
+
+    # Start a foreground port-forward to the SAME master (blocks until Ctrl+C)
+    echo ""
+    gum style --foreground 82 "✓ kubectl is ready once the forward is up. Try: kubectl get nodes"
+    echo ""
+    echo "Starting port forward: localhost:6443 -> $hostname:6443"
+    echo "Press Ctrl+C to stop"
+    echo ""
+
+    # Double hop: laptop->bastion->master, both with -L forwarding.
+    # Runs in the foreground and holds the terminal until the user hits Ctrl+C.
+    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
+        -L "6443:localhost:6443" -t cluster@"$bastion_ip" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" || true
+
+    echo ""
+    echo "Port forward closed."
+    return 0
+}
+
+# Quick mode - nuke kubeconfig, fetch a fresh one from a master, then
+# port-forward localhost:6443 to that SAME master (interactive menu entry).
+quick_kubeconfig_mode() {
+    local cluster_id="$1"
+    local bastion_ip="$2"
+    local servers="$3"
+    local org_id="$4"
+    local bastion_key_id="$5"
+
+    # Filter to only master nodes
+    local master_servers
+    master_servers=$(echo "$servers" | grep "^MASTER|" || true)
+
+    if [[ -z "$master_servers" ]]; then
+        echo "No master nodes found"
+        echo ""
+        read -n 1 -s -r -p "Press any key to continue..." || true
+        return
+    fi
+
+    # Select a master - auto-pick when there is only one (faster)
+    local hostname
+    local master_count
+    master_count=$(echo "$master_servers" | grep -c "^MASTER|")
+
+    if [[ "$master_count" -eq 1 ]]; then
+        hostname=$(echo "$master_servers" | head -n1 | cut -d'|' -f2)
+    else
+        clear
+        local server_list
+        server_list=$(echo "$master_servers" | awk -F'|' '{printf "[%s] %s (%s)\n", $1, $2, $3}')
+
+        local server_selection
+        server_selection=$(echo -e "$server_list\n◀ Back" | gum choose --header="Select master (fresh kubeconfig + port-forward):" || true)
+
+        # Handle escape or empty selection
+        if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
+            return
+        fi
+
+        hostname=$(echo "$server_selection" | sed -n 's/.*] \([^ ]*\).*/\1/p')
+    fi
+
+    # Resolve the target IP (prefer private, fallback to public) and SSH key
+    local server_line
+    server_line=$(echo "$master_servers" | grep -F "|$hostname|" || true)
+    local private_ip
+    private_ip=$(echo "$server_line" | cut -d'|' -f5)
+    local public_ip
+    public_ip=$(echo "$server_line" | cut -d'|' -f4)
+    local target_key_id
+    target_key_id=$(echo "$server_line" | cut -d'|' -f6)
+
+    local target_ip
+    if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
+        target_ip="$private_ip"
+    else
+        target_ip="$public_ip"
+    fi
+
+    clear
+    gum style --border rounded --padding "1 2" "Quick connect: $hostname"
+    echo ""
+
+    kubeconfig_and_port_forward "$bastion_ip" "$hostname" "$target_ip" "$org_id" "$bastion_key_id" "$target_key_id" || true
+
     echo ""
     read -n 1 -s -r -p "Press any key to continue..." || true
     echo ""
@@ -1285,27 +1425,199 @@ port_forward_background() {
         "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip" &
 }
 
+usage() {
+    cat <<'EOF'
+gluekube_ssh - AutoGlue SSH / kubeconfig helper
+
+USAGE:
+  gluekube_ssh                                   Interactive mode (profile → org → cluster menu)
+  gluekube_ssh --profile <name>                  Interactive, starting from a saved profile
+  gluekube_ssh --profile <name> --cluster <fqdn> --kubectl [--org <name>]
+                                                 Headless quick-connect: nuke ~/.kube/config,
+                                                 fetch a fresh one from the first master, and
+                                                 foreground port-forward localhost:6443 to it.
+
+OPTIONS:
+  --profile <name>   Saved profile to use (required for --cluster / --kubectl)
+  --cluster <fqdn>   Which cluster to target
+  --kubectl          Action: quick-connect (fresh kubeconfig + port-forward to the first
+                     master). Requires --cluster.
+  --org <name>       Limit cluster lookup to this org (optional; otherwise all orgs are scanned)
+  -h, --help         Show this help
+
+EXAMPLE:
+  gluekube_ssh --profile nonprod --cluster nonprod.foobar.onglueops.com --kubectl
+EOF
+}
+
+# Headless quick-connect: resolve a cluster by name (scanning orgs, or the one
+# given via --org), pick its FIRST master, and run the shared quick-connect.
+headless_quick_connect() {
+    local cluster_name="$1"
+    local org_filter="${2:-}"
+
+    echo "Resolving cluster '$cluster_name'..."
+
+    local orgs
+    orgs=$(api_call GET "/orgs")
+
+    # Build "id|name" org entries, optionally narrowed to --org
+    local org_entries
+    org_entries=$(echo "$orgs" | jq -r '.[] | "\(.id)|\(.name)"' 2>/dev/null || true)
+
+    if [[ -z "$org_entries" ]]; then
+        gum style --foreground 196 "✗ No organizations found (check API key / endpoint)"
+        return 1
+    fi
+
+    if [[ -n "$org_filter" ]]; then
+        org_entries=$(echo "$org_entries" | awk -F'|' -v o="$org_filter" '$2==o')
+        if [[ -z "$org_entries" ]]; then
+            gum style --foreground 196 "✗ Org '$org_filter' not found"
+            return 1
+        fi
+    fi
+
+    # Scan org(s) for a cluster whose name matches; first match wins
+    local found_org_id="" found_cluster_id="" all_names=""
+    local org_id org_name clusters match names
+    while IFS='|' read -r org_id org_name; do
+        [[ -z "$org_id" ]] && continue
+        clusters=$(api_call GET "/clusters" "$org_id")
+        names=$(echo "$clusters" | jq -r '.[].name' 2>/dev/null || true)
+        [[ -n "$names" ]] && all_names+="$names"$'\n'
+        match=$(echo "$clusters" | jq -r --arg n "$cluster_name" '.[] | select(.name==$n) | .id' 2>/dev/null | head -n1 || true)
+        if [[ -n "$match" ]]; then
+            found_org_id="$org_id"
+            found_cluster_id="$match"
+            break
+        fi
+    done <<< "$org_entries"
+
+    if [[ -z "$found_cluster_id" ]]; then
+        gum style --foreground 196 "✗ Cluster '$cluster_name' not found"
+        echo ""
+        echo "Available clusters:"
+        echo "$all_names" | sed '/^$/d' | sort -u | sed 's/^/  - /'
+        return 1
+    fi
+
+    # Fetch full cluster details
+    local cluster
+    cluster=$(api_call GET "/clusters/$found_cluster_id" "$found_org_id")
+
+    local bastion_ip bastion_key_id
+    bastion_ip=$(echo "$cluster" | jq -r '.bastion_server.public_ip_address // empty')
+    bastion_key_id=$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')
+
+    if [[ -z "$bastion_ip" ]]; then
+        gum style --foreground 196 "✗ Cluster '$cluster_name' has no bastion - cannot connect"
+        return 1
+    fi
+
+    # First master node
+    local master_line
+    master_line=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select((.role|ascii_downcase)=="master") | "\(.role|ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null | head -n1 || true)
+
+    if [[ -z "$master_line" ]]; then
+        gum style --foreground 196 "✗ No master nodes found for cluster '$cluster_name'"
+        return 1
+    fi
+
+    local hostname public_ip private_ip target_key_id
+    hostname=$(echo "$master_line" | cut -d'|' -f2)
+    public_ip=$(echo "$master_line" | cut -d'|' -f4)
+    private_ip=$(echo "$master_line" | cut -d'|' -f5)
+    target_key_id=$(echo "$master_line" | cut -d'|' -f6)
+
+    local target_ip
+    if [[ -n "$private_ip" ]] && [[ "$private_ip" != "N/A" ]]; then
+        target_ip="$private_ip"
+    else
+        target_ip="$public_ip"
+    fi
+
+    gum style --border rounded --padding "1 2" "Quick connect: $cluster_name → $hostname"
+    echo ""
+
+    kubeconfig_and_port_forward "$bastion_ip" "$hostname" "$target_ip" "$found_org_id" "$bastion_key_id" "$target_key_id"
+}
+
 # Main
 main() {
-    # Check for --profile flag
-    if [[ "${1:-}" == "--profile" && -n "${2:-}" ]]; then
-        SELECTED_PROFILE="$2"
+    local arg_profile="" arg_cluster="" arg_org="" arg_kubectl=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile)
+                arg_profile="${2:-}"
+                [[ -z "$arg_profile" ]] && { echo "Error: --profile requires a value" >&2; exit 1; }
+                shift 2
+                ;;
+            --cluster)
+                arg_cluster="${2:-}"
+                [[ -z "$arg_cluster" ]] && { echo "Error: --cluster requires a value" >&2; exit 1; }
+                shift 2
+                ;;
+            --kubectl)
+                arg_kubectl=true
+                shift
+                ;;
+            --org)
+                arg_org="${2:-}"
+                [[ -z "$arg_org" ]] && { echo "Error: --org requires a value" >&2; exit 1; }
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Error: unknown argument '$1'" >&2
+                echo "" >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    # Resolve profile (headless --cluster / --kubectl require one)
+    if [[ -n "$arg_profile" ]]; then
+        SELECTED_PROFILE="$arg_profile"
         local profile
-        profile=$(get_profile "$2")
-        
+        profile=$(get_profile "$arg_profile")
+
         if [[ -z "$profile" ]]; then
-            gum style --foreground 196 "Profile '$2' not found"
+            gum style --foreground 196 "Profile '$arg_profile' not found"
             exit 1
         fi
-        
+
         API_KEY=$(echo "$profile" | jq -r '.api_key')
         API_ENDPOINT=$(echo "$profile" | jq -r '.api_endpoint')
+    elif [[ -n "$arg_cluster" ]] || [[ "$arg_kubectl" == true ]]; then
+        echo "Error: --cluster / --kubectl require --profile" >&2
+        exit 1
     else
         # Interactive profile selection
         profile_menu
     fi
-    
-    # Browse infrastructure - will loop internally until user exits
+
+    # Headless quick-connect: --kubectl is the action, --cluster names the target
+    if [[ "$arg_kubectl" == true ]]; then
+        if [[ -z "$arg_cluster" ]]; then
+            echo "Error: --kubectl requires --cluster <fqdn>" >&2
+            exit 1
+        fi
+        local rc=0
+        headless_quick_connect "$arg_cluster" "$arg_org" || rc=$?
+        exit "$rc"
+    elif [[ -n "$arg_cluster" ]]; then
+        echo "Error: --cluster requires an action (add --kubectl)" >&2
+        exit 1
+    fi
+
+    # Otherwise, browse infrastructure - loops internally until the user exits
     browse_infrastructure
 }
 
