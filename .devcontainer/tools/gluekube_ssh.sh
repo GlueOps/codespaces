@@ -877,31 +877,38 @@ kubeconfig_and_port_forward() {
         return 1
     fi
 
-    # Start a foreground port-forward to the SAME master (blocks until Ctrl+C)
+    # Start a foreground port-forward. The path is:
+    #   local:6443  ->  bastion:<mid_port>  ->  master:6443
+    # The middle hop deliberately uses a RANDOM high port on the bastion, NOT
+    # 6443. The old code bound 6443 on the bastion too, so a stale forward left
+    # on the bastion's 6443 (from an interrupted session or another engineer)
+    # made every new connect fail with "bind [127.0.0.1]:6443: Address already
+    # in use" - even when the LOCAL 6443 was free. A random mid port avoids it.
+    local mid_port=$(( 20000 + (RANDOM % 20000) ))
+
     echo ""
-    echo "Starting port forward: localhost:6443 -> $hostname:6443"
+    echo "Starting port forward: localhost:6443 -> $hostname:6443 (via bastion:$mid_port)"
     echo "Leave this running; use kubectl from another terminal (e.g. kubectl get nodes)."
     echo "Press Ctrl+C to stop."
     echo ""
 
-    # Double hop: laptop->bastion->master, both with -L forwarding.
-    # Runs in the foreground and holds the terminal until the user hits Ctrl+C.
-    # Capture exit status + elapsed time so we can tell a real bind failure
-    # (exits immediately) from a normal user Ctrl+C (ran for a while).
+    # ExitOnForwardFailure on BOTH hops so a bind clash fails fast instead of
+    # hanging. Capture exit status + elapsed time to distinguish a real bind
+    # failure (exits immediately) from a normal user Ctrl+C (ran for a while).
     local fwd_start fwd_rc=0
     fwd_start=$(date +%s)
     ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-        -L "6443:localhost:6443" -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" || fwd_rc=$?
+        -L "6443:localhost:${mid_port}" -t cluster@"$bastion_ip" \
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes -N -L ${mid_port}:localhost:6443 cluster@$target_ip" || fwd_rc=$?
     local fwd_elapsed=$(( $(date +%s) - fwd_start ))
 
     echo ""
     if [[ $fwd_rc -ne 0 && $fwd_elapsed -lt 4 ]]; then
         gum style --foreground 196 "✗ Port forward failed to start (ssh exit $fwd_rc after ${fwd_elapsed}s)."
-        echo "Port 6443 could not be bound. Check what is using localhost:6443:"
+        echo "Could not establish the tunnel. If local port 6443 is in use:"
         ss -tanp 2>/dev/null | awk 'NR==1 || $4 ~ /:6443$/' || true
         echo ""
-        echo "If nothing is listed, it may be a socket in TIME_WAIT - wait ~30s and re-run."
+        echo "Otherwise a previous tunnel may be lingering on the bastion; re-run to retry."
         return 1
     fi
 
