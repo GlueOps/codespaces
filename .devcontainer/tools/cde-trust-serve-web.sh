@@ -1,85 +1,60 @@
 #!/usr/bin/env bash
-# cde-trust-serve-web — disable VS Code "Workspace Trust" for `code serve-web`.
+# cde-trust-serve-web — open CDE folders without the "Do you trust the authors…" prompt.
 #
 # The CDE web UI is served by `code serve-web`, which runs the workbench in the BROWSER.
-# In that mode the usual ways to disable Workspace Trust do NOT work:
-#   - user settings live in the browser, so a server-side settings.json is ignored for the
-#     application-scoped `security.workspace.trust.enabled`;
-#   - `product.json` `configurationDefaults` don't reach the browser workbench;
-#   - `code serve-web` refuses to forward the server's `--disable-workspace-trust` flag
-#     ("unexpected argument").
+# In that mode the usual ways to disable Workspace Trust don't work: user settings live in
+# the browser (a server-side settings.json is ignored for the application-scoped
+# `security.workspace.trust.enabled`), and `product.json` defaults don't reach the browser.
 #
-# The workbench decides trust with:
-#     isWorkspaceTrustEnabled = disableWorkspaceTrust ? false : <config value>
-#     disableWorkspaceTrust   = !options.enableWorkspaceTrust
-# and the server (server-main.js) sets that option from the CLI flag:
-#     enableWorkspaceTrust: !args["disable-workspace-trust"]
-# So we patch server-main.js to force `enableWorkspaceTrust:false`, which makes
-# disableWorkspaceTrust true and short-circuits the "Do you trust the authors…" prompt off
-# for every folder — without reading any setting. Idempotent and non-fatal.
+# VS Code's SERVER does support a native `--disable-workspace-trust` flag (server-main.js:
+# `enableWorkspaceTrust: !args["disable-workspace-trust"]`, which the web workbench turns
+# into `disableWorkspaceTrust`, short-circuiting the prompt off). The only catch is that the
+# `code serve-web` Rust CLI refuses to forward that flag ("unexpected argument").
 #
-# Called from developer-setup.sh's `dev` before `code serve-web` launches. The serve-web
-# SERVER (server-main.js) is downloaded lazily on the first browser CONNECTION, not at
-# `serve-web` startup — so if it isn't present yet we briefly start serve-web and poke its
-# port with curl to trigger the download, then patch. That makes even the first real
-# connection prompt-free.
+# serve-web launches the server through a small shell wrapper, `<server>/bin/code-server`,
+# which ends with:  "$ROOT/node" ... "$ROOT/out/server-main.js" "$@"
+# So we shim that wrapper to append the native flag — a documented flag + a stable launcher
+# script, no patching of minified server code. Idempotent and non-fatal.
+#
+# Called from developer-setup.sh's `dev` before `code serve-web` launches. Deliberately does
+# NO network / download: it only shims a server that's already on disk. The serve-web server
+# is downloaded lazily on the first browser connection, so on a brand-new container the very
+# first connection still prompts once; every `dev` after that shims it and the prompt is gone.
 
 set -u
 
 SW="$HOME/.vscode/cli/serve-web"
-NEEDLE='enableWorkspaceTrust:!this._environmentService.args["disable-workspace-trust"]'
-SEDEXPR='s/enableWorkspaceTrust:!this\._environmentService\.args\["disable-workspace-trust"\]/enableWorkspaceTrust:false/g'
+SHIM_MARK='cde-trust-serve-web shim'
 
-# True when a fully-extracted server exists (ignore the transient "<hash>.staging" dir).
-server_present() {
-    local f
-    for f in "$SW"/*/out/server-main.js; do
-        case "$f" in *".staging/"*) continue ;; esac
-        [ -f "$f" ] && return 0
-    done
-    return 1
+# Wrap <server>/bin/code-server so the server is always launched with --disable-workspace-trust.
+shim_one() {
+    local cs="$1" orig="$1.orig" tmp
+    [ -f "$cs" ] || return 1
+    grep -q "$SHIM_MARK" "$cs" 2>/dev/null && return 0     # already shimmed
+    [ -f "$orig" ] || cp -p "$cs" "$orig"                  # preserve the real launcher once
+    tmp="$cs.tmp.$$"
+    cat > "$tmp" <<'SH'
+#!/usr/bin/env sh
+# cde-trust-serve-web shim — pass VS Code's native --disable-workspace-trust flag to the
+# server (code serve-web won't forward it) so serve-web opens folders without the trust prompt.
+exec "$(dirname "$0")/code-server.orig" "$@" --disable-workspace-trust
+SH
+    chmod +x "$tmp"
+    mv "$tmp" "$cs"
 }
 
-if ! server_present; then
-    echo "cde-trust-serve-web: serve-web server not present; triggering its download…"
-    log="$(mktemp)"
-    timeout 240 code serve-web --accept-server-license-terms --without-connection-token \
-        --host 127.0.0.1 --port 0 >"$log" 2>&1 &
-    dl=$!
-    # Discover the random port serve-web picked.
-    port=""
-    for _ in $(seq 1 30); do
-        port="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "$log" 2>/dev/null | head -1 | grep -oE '[0-9]+$')"
-        [ -n "$port" ] && break
-        sleep 1
-    done
-    # The server downloads lazily on the first HTTP hit — poke it until server-main.js lands.
-    if [ -n "$port" ]; then
-        for _ in $(seq 1 180); do
-            curl -fsS -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null || true
-            server_present && break
-            sleep 1
-        done
-    fi
-    kill "$dl" 2>/dev/null || true
-    wait "$dl" 2>/dev/null || true
-    rm -f "$log"
-    sleep 2   # let extraction/rename settle
-fi
-
 changed=0
-for f in "$SW"/*/out/server-main.js; do
-    case "$f" in *".staging/"*) continue ;; esac
-    [ -f "$f" ] || continue
-    if grep -qF "$NEEDLE" "$f"; then
-        if sed -i "$SEDEXPR" "$f"; then
-            echo "cde-trust-serve-web: disabled Workspace Trust in $f"
-            changed=1
-        fi
+for cs in "$SW"/*/bin/code-server; do
+    case "$cs" in *".staging/"*) continue ;; esac   # skip the transient download dir
+    [ -f "$cs" ] || continue                          # no server downloaded yet -> nothing to do
+    grep -q "$SHIM_MARK" "$cs" 2>/dev/null && continue
+    if shim_one "$cs"; then
+        echo "cde-trust-serve-web: shimmed $cs with --disable-workspace-trust"
+        changed=1
     fi
 done
 
 if [ "$changed" -eq 0 ]; then
-    echo "cde-trust-serve-web: no change (already patched, or server missing / pattern changed)"
+    echo "cde-trust-serve-web: no change (already shimmed, or server not downloaded yet)"
 fi
 exit 0
