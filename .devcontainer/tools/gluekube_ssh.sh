@@ -658,16 +658,18 @@ kubectl_mode() {
             fi
         fi
         
-        # Start port forward in background
-        echo "Starting port forward: localhost:6443 -> $hostname:6443"
-        
+        # Start port forward in background. Route local:6443 -> bastion:<random>
+        # -> master:6443 so a stale forward on the bastion's 6443 can't block us.
+        local mid_port=$(( 20000 + (RANDOM % 20000) ))
+        echo "Starting port forward: localhost:6443 -> $hostname:6443 (via bastion:$mid_port)"
+
         # Create a temporary error log
         local error_log=$(mktemp)
-        
+
         # Start port forward with error output captured - using proper backgrounding
         (ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-            -L "6443:localhost:6443" -t cluster@"$bastion_ip" \
-            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" \
+            -L "6443:localhost:${mid_port}" -t cluster@"$bastion_ip" \
+            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes -N -L ${mid_port}:localhost:6443 cluster@$target_ip" \
             2>"$error_log") &
         
         local ssh_pid=$!
@@ -1447,40 +1449,6 @@ connect_ssh() {
         ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
             "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip"
     fi
-}
-
-port_forward() {
-    local bastion_ip="$1"
-    local cluster_id="$2"
-    local hostname="$3"
-    local target_ip="${4:-}"
-    
-    local port="6443"
-    
-    echo "Starting port forward: localhost:$port -> $hostname:6443"
-    echo "Press Ctrl+C to stop forwarding"
-    echo ""
-    
-    # Double hop: laptop->bastion->target, both with -L forwarding
-    # Use agent forwarding with private IP address
-    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-        -L "$port:localhost:$port" -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip"
-}
-
-port_forward_background() {
-    local bastion_ip="$1"
-    local cluster_id="$2"
-    local hostname="$3"
-    local target_ip="${4:-}"
-    
-    local port="6443"
-    
-    # Double hop: laptop->bastion->target, both with -L forwarding
-    # Use agent forwarding with private IP address, run in background
-    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-        -f -N -L "$port:localhost:$port" cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L $port:localhost:6443 cluster@$target_ip" &
 }
 
 usage() {
