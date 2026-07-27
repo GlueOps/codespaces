@@ -19,14 +19,14 @@ python --version
 
 ## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`
 
-When a codespace container starts, `dev` runs a one-time bootstrap (`cde-boot`) driven by the `CDE_SETUP_SCRIPT` environment variable (supplied by the Slack bot via `/etc/glueops/codespace.env`):
+When a codespace container starts, `dev` runs a one-time bootstrap (`cde-boot`) driven by the `CDE_SETUP_SCRIPT` environment variable (supplied by the Slack bot via `/etc/glueops/codespace.env`). The value selects what runs:
 
-- **`cde-init`** (the default value) — authenticates GitHub from `GITHUB_TOKEN` (non-interactive; runs `gh auth setup-git` so `git`/private-repo clones work, and sets your git identity), clones `GLUEOPS_CDE_CLONE_REPO` into `/workspaces/glueops/<repo>` (public repos need no token), and seeds `gluekube_ssh` (AutoGlue) `prod`/`nonprod` profiles from `GLUEKUBE_SSH_AUTOGLUE_{PROD,NONPROD}_{URL,TOKEN}`.
+- **unset / empty** (the default — the Slack bot leaves it commented out) — runs **`cde-init`**: authenticates GitHub from `GITHUB_TOKEN` (non-interactive; runs `gh auth setup-git` so `git`/private-repo clones work, and sets your git identity), clones `GLUEOPS_CDE_CLONE_REPO` into `/workspaces/glueops/<repo>` (public repos need no token), and seeds `gluekube_ssh` (AutoGlue) `prod`/`nonprod` profiles from `GLUEKUBE_SSH_AUTOGLUE_{PROD,NONPROD}_{URL,TOKEN}` — a profile is seeded only when **both** its URL and token are set.
 - **a command** — e.g. `curl setup.example.com | zsh` runs instead of `cde-init`.
-- **`base64:<encoded>`** — a base64-encoded script, for complex/multi-line setup (`<your script> | base64 -w0`).
-- **empty** — skip setup.
+- **`base64:<encoded>`** — a base64-encoded script, for complex/multi-line setup (`<your script> | base64 -w0`). A decode failure is refused (never runs a partial script).
+- **`true`** (or any no-op) — skip setup entirely.
 
-Every step is best-effort and non-fatal; unconfigured inputs are skipped. It runs once per container (sentinel `~/.cde-init-done`); set `CDE_INIT_FORCE=1`, or just run `cde-init` / `cde-boot` again, to re-run. The tools live in `.devcontainer/tools/` (`cde-init.sh`, `cde-boot.sh`) and are installed to `/usr/local/bin` by the image build.
+Every step is best-effort and non-fatal; unconfigured inputs are skipped. It runs once per container: the sentinel `~/.cde-init-done` is written **only when setup exits 0**, so a hard failure (or a bad `base64:` value) is retried on the next boot rather than silently marked done; output is captured to `~/.cde-init.log`. Set `CDE_INIT_FORCE=1`, or just run `cde-init` / `cde-boot` again, to re-run. The tools live in `.devcontainer/tools/` (`cde-init.sh`, `cde-boot.sh`) and are installed to `/usr/local/bin` by the image build.
 
 Because the default GitHub auth is token-based, running `yolo` afterward is a smooth no-op (it detects the existing auth and skips the interactive browser login).
 

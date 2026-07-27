@@ -13,20 +13,31 @@
 
 export GIT_TERMINAL_PROMPT=0   # never hang on a credential prompt (e.g. private repo, no token)
 
-# --- GitHub auth from token (only if provided and not already authenticated) ---
-if [ -n "${GITHUB_TOKEN:-}" ] && ! gh auth status >/dev/null 2>&1; then
-    echo "cde-init: authenticating gh from GITHUB_TOKEN"
-    tok="$GITHUB_TOKEN"; unset GITHUB_TOKEN   # gh refuses --with-token while the env var is set
-    if printf '%s' "$tok" | gh auth login -h github.com -p https --with-token; then
-        gh auth setup-git
-        # best-effort git identity so commits work immediately (mirrors yolo.sh)
-        email="$(gh api /user/emails -q '.[] | select(.primary).email' 2>/dev/null || true)"
-        name="$(gh api user -q .name 2>/dev/null || true)"
-        [ -n "$email" ] && git config --global user.email "$email"
-        [ -n "$name" ]  && git config --global user.name  "$name"
+# --- GitHub auth from token (only if provided) ---
+# `gh auth status` treats a GITHUB_TOKEN env var as "already authenticated", so probing
+# while it's still set would wrongly skip the whole block — including `gh auth setup-git`,
+# which registers gh as git's credential helper (without it, private `git clone` fails).
+# gh also refuses `--with-token` while the env var is set. So unset it FIRST, then probe the
+# real (persisted) login state, and always run setup-git when a token was provided.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    tok="$GITHUB_TOKEN"; unset GITHUB_TOKEN
+    if gh auth status >/dev/null 2>&1; then
+        echo "cde-init: gh already authenticated"
     else
-        echo "cde-init: gh auth failed (continuing)"
+        echo "cde-init: authenticating gh from GITHUB_TOKEN"
+        if printf '%s' "$tok" | gh auth login -h github.com -p https --with-token; then
+            # best-effort git identity so commits work immediately (mirrors yolo.sh)
+            email="$(gh api /user/emails -q '.[] | select(.primary).email' 2>/dev/null || true)"
+            name="$(gh api user -q .name 2>/dev/null || true)"
+            [ -n "$email" ] && git config --global user.email "$email"
+            [ -n "$name" ]  && git config --global user.name  "$name"
+        else
+            echo "cde-init: gh auth failed (continuing)"
+        fi
     fi
+    # Ensure git uses gh as its credential helper, whether we just logged in or gh was
+    # already authenticated — this is what makes private-repo clones work.
+    gh auth setup-git 2>/dev/null || true
 fi
 
 # --- Clone the requested repo (public works without a token; idempotent) ---
