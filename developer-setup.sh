@@ -284,6 +284,7 @@ dev() {
 
         if ! gum spin --spinner dot --title "Creating container '$CONTAINER_NAME'..." --show-output -- \
             sudo docker run -itd --name "$CONTAINER_NAME" \
+                --restart=unless-stopped \
                 --net=host \
                 --cap-add=SYS_PTRACE \
                 --security-opt seccomp=unconfined \
