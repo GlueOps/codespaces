@@ -792,6 +792,29 @@ kubeconfig_mode() {
     echo ""
 }
 
+# True if ANY local TCP socket is using port 6443 (LISTEN, ESTABLISHED, or
+# TIME_WAIT). lsof alone misses sockets it can't attribute (e.g. root-owned)
+# and TIME_WAIT leftovers, so fall back to `ss -tan`, which sees them all.
+port6443_in_use() {
+    lsof -ti :6443 >/dev/null 2>&1 && return 0
+    if command -v ss >/dev/null 2>&1; then
+        ss -tan 2>/dev/null | awk 'NR>1 { n=split($4,a,":"); if (a[n]=="6443") { found=1; exit } } END { exit found?0:1 }' && return 0
+    fi
+    return 1
+}
+
+# Print the PIDs currently holding local port 6443 (best effort; TIME_WAIT
+# sockets have no owning process and won't appear).
+port6443_pids() {
+    {
+        lsof -ti :6443 2>/dev/null || true
+        if command -v ss >/dev/null 2>&1; then
+            ss -tlnp 2>/dev/null | awk 'NR>1 { n=split($4,a,":"); if (a[n]=="6443") print }' \
+                | grep -oE 'pid=[0-9]+' | cut -d= -f2 || true
+        fi
+    } | sort -u
+}
+
 # Core quick-connect action (shared by the interactive menu and the headless
 # --cluster path): load keys, free port 6443, nuke ~/.kube/config, fetch a
 # fresh one from the given master, then foreground port-forward to it.
@@ -807,13 +830,28 @@ kubeconfig_and_port_forward() {
     # Load SSH keys for this connection (clears old keys, loads bastion + target)
     load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
 
-    # Free port 6443 if something is already bound to it
-    if lsof -ti :6443 >/dev/null 2>&1; then
+    # Free local port 6443. The fetched kubeconfig pins the API server to
+    # 127.0.0.1:6443, so the forward MUST use exactly this port - we can't just
+    # pick another one. Kill any process holding it (escalate to sudo for
+    # root-owned listeners); a TIME_WAIT leftover has no owner and can't be
+    # killed, so surface that clearly instead of failing cryptically later.
+    if port6443_in_use; then
         gum style --foreground 208 "⚠️  Port 6443 in use - freeing it..."
-        lsof -ti :6443 | xargs kill -9 2>/dev/null || true
+        local held_pids
+        held_pids=$(port6443_pids)
+        if [[ -n "$held_pids" ]]; then
+            echo "$held_pids" | xargs -r kill -9 2>/dev/null || true
+            if port6443_in_use && command -v sudo >/dev/null 2>&1; then
+                echo "$held_pids" | xargs -r sudo -n kill -9 2>/dev/null || true
+            fi
+        fi
         sleep 2
-        if lsof -ti :6443 >/dev/null 2>&1; then
-            gum style --foreground 196 "✗ Failed to free port 6443"
+        if port6443_in_use; then
+            gum style --foreground 196 "✗ Could not free port 6443. Still held by:"
+            ss -tanp 2>/dev/null | awk 'NR==1 || $4 ~ /:6443$/' || true
+            echo ""
+            echo "If nothing owns it above, it is likely a socket in TIME_WAIT -"
+            echo "wait ~30s and re-run, or stop whatever is using localhost:6443."
             return 1
         fi
     fi
@@ -841,19 +879,32 @@ kubeconfig_and_port_forward() {
 
     # Start a foreground port-forward to the SAME master (blocks until Ctrl+C)
     echo ""
-    gum style --foreground 82 "✓ kubectl is ready once the forward is up. Try: kubectl get nodes"
-    echo ""
     echo "Starting port forward: localhost:6443 -> $hostname:6443"
-    echo "Press Ctrl+C to stop"
+    echo "Leave this running; use kubectl from another terminal (e.g. kubectl get nodes)."
+    echo "Press Ctrl+C to stop."
     echo ""
 
     # Double hop: laptop->bastion->master, both with -L forwarding.
     # Runs in the foreground and holds the terminal until the user hits Ctrl+C.
+    # Capture exit status + elapsed time so we can tell a real bind failure
+    # (exits immediately) from a normal user Ctrl+C (ran for a while).
+    local fwd_start fwd_rc=0
+    fwd_start=$(date +%s)
     ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
         -L "6443:localhost:6443" -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" || true
+        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -N -L 6443:localhost:6443 cluster@$target_ip" || fwd_rc=$?
+    local fwd_elapsed=$(( $(date +%s) - fwd_start ))
 
     echo ""
+    if [[ $fwd_rc -ne 0 && $fwd_elapsed -lt 4 ]]; then
+        gum style --foreground 196 "✗ Port forward failed to start (ssh exit $fwd_rc after ${fwd_elapsed}s)."
+        echo "Port 6443 could not be bound. Check what is using localhost:6443:"
+        ss -tanp 2>/dev/null | awk 'NR==1 || $4 ~ /:6443$/' || true
+        echo ""
+        echo "If nothing is listed, it may be a socket in TIME_WAIT - wait ~30s and re-run."
+        return 1
+    fi
+
     echo "Port forward closed."
     return 0
 }
