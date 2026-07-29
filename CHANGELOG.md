@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.1](https://github.com/GlueOps/codespaces/compare/v0.154.0...v0.154.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* enable cloud-init on Incus VMs ([df9c02a](https://github.com/GlueOps/codespaces/commit/df9c02a4207944273661a7f129d972ced4623567))
+
 ## [0.154.0](https://github.com/GlueOps/codespaces/compare/v0.153.0...v0.154.0) (2026-07-29)
 
 
