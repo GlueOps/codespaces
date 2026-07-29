@@ -33,7 +33,8 @@ printf '[general]\nblacklist =\n' | sudo tee /etc/qemu/qemu-ga.conf
 #sudo apt-get -s dist-upgrade | grep "^Inst" | grep -i securi | awk -F " " {'print $2'} | xargs sudo apt-get install -y
 sudo groupadd -f docker
 sudo usermod -aG docker vscode
-echo 'fs.inotify.max_user_instances=1024' | sudo tee -a /etc/sysctl.conf
+# Debian 13 (trixie) systemd-sysctl no longer reads /etc/sysctl.conf; use /etc/sysctl.d/.
+echo 'fs.inotify.max_user_instances=1024' | sudo tee /etc/sysctl.d/99-glueops-codespaces.conf
 echo 1024 | sudo tee /proc/sys/fs/inotify/max_user_instances
 echo "Create .glueopsrc"
 
