@@ -23,7 +23,7 @@ echo "Installing other requirements now"
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 sudo mkdir -p /etc/docker && echo '{"mtu": 1400}' | sudo tee /etc/docker/daemon.json > /dev/null && sudo systemctl restart docker
-sudo apt-get update
+sudo apt-get update --error-on=any
 sudo apt install tmux jq figlet qemu-guest-agent incus-agent autossh ripgrep -y
 sudo apt-get clean
 sudo mkdir -p /etc/qemu

@@ -9,5 +9,7 @@ df -h /
 lsblk
 
 echo "update packages..."
-sudo apt-get update
+# --error-on=any: fail the build if ANY apt source errors, rather than silently
+# proceeding with a stale/partial index and shipping a subtly-broken image.
+sudo apt-get update --error-on=any
 
