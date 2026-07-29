@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.154.0](https://github.com/GlueOps/codespaces/compare/v0.153.0...v0.154.0) (2026-07-29)
+
+
+### Features
+
+* upgrade Packer VM base to Debian 13 and install incus-agent ([8292554](https://github.com/GlueOps/codespaces/commit/8292554f574aee6fe31036d82693b74546f4dd99))
+
+
+### Bug Fixes
+
+* write inotify sysctl to /etc/sysctl.d for Debian 13 ([da61828](https://github.com/GlueOps/codespaces/commit/da6182883c9da1bb7077d0c1d7ae6ebb2681fc97))
+
+
+### Miscellaneous Chores
+
+* fail the build on any apt source error (apt --error-on=any) ([e55f27a](https://github.com/GlueOps/codespaces/commit/e55f27a3a67a4a1f4873f365fdcf3ef3542f3928))
+
 ## [0.153.0](https://github.com/GlueOps/codespaces/compare/v0.152.0...v0.153.0) (2026-07-27)
 
 
