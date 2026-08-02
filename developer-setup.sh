@@ -358,6 +358,22 @@ dev() {
     
     [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
 
+    # Regional sish endpoint written by cloud-init on newer VMs; older VMs
+    # have no file and stay on the legacy central tunnel.
+    TUNNEL_ENDPOINT="tunnels.glueopshosted.com"
+    if [ -s /etc/glueops/tunnel_endpoint ]; then
+        _regional_endpoint="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
+        [ -n "$_regional_endpoint" ] && TUNNEL_ENDPOINT="$_regional_endpoint"
+    fi
+
+    # Legacy central sish runs --append-user-to-subdomain: bind "cde" + the
+    # SSH username -> cde-<hostname>.tunnels.glueopshosted.com. Regional
+    # instances don't; the VM binds its bare hostname so URLs are just
+    # <hostname>.<region>.tunnels.cde.glueopshosted.com. The slackbot derives
+    # the access URL from the same endpoint-value rule, so keep them in sync.
+    TUNNEL_BIND="cde"
+    [ "$TUNNEL_ENDPOINT" != "tunnels.glueopshosted.com" ] && TUNNEL_BIND="$HOSTNAME"
+
     # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
     # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
     # older container images that predate cde-boot.
@@ -369,7 +385,7 @@ dev() {
     sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
 
     if [ -n "$CDE_TOKEN" ]; then
-        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R cde:80:localhost:8000 tunnels.glueopshosted.com
+        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R "$TUNNEL_BIND":80:localhost:8000 "$TUNNEL_ENDPOINT"
         # Disable VS Code Workspace Trust so folders open without the "Do you trust the
         # authors…" prompt. Normally a no-op (the server is baked + shimmed at image build);
         # re-shims if a VS Code update pulled a new server. If the prompt comes back, see the
