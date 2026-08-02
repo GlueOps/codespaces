@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.155.0](https://github.com/GlueOps/codespaces/compare/v0.154.1...v0.155.0) (2026-08-02)
+
+
+### Features
+
+* read tunnel endpoint from /etc/glueops/tunnel_endpoint ([#550](https://github.com/GlueOps/codespaces/issues/550)) ([97e7548](https://github.com/GlueOps/codespaces/commit/97e754857d62cb0964ecf1a3e9fc56ba71b41b98))
+
+
+### Miscellaneous Chores
+
+* add Apache-2.0 LICENSE ([#547](https://github.com/GlueOps/codespaces/issues/547)) ([e9757d9](https://github.com/GlueOps/codespaces/commit/e9757d9221ece1aa9631a0906e272d5fd9ce473a))
+* **fallback:** update docker/login-action ([#542](https://github.com/GlueOps/codespaces/issues/542)) ([29d72ee](https://github.com/GlueOps/codespaces/commit/29d72eeeefe5c66d0595c85a55ab97d359430538))
+* **patch:** update @anthropic-ai/claude-code to 2.1.200 #patch ([#549](https://github.com/GlueOps/codespaces/issues/549)) ([0b85449](https://github.com/GlueOps/codespaces/commit/0b854498365861e5b147f2252fcab523c39955b7))
+
 ## [0.154.1](https://github.com/GlueOps/codespaces/compare/v0.154.0...v0.154.1) (2026-07-29)
 
 
