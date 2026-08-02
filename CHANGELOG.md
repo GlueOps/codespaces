@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.1](https://github.com/GlueOps/codespaces/compare/v0.155.0...v0.155.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* pin sish tunnel auth to the dedicated key with IdentitiesOnly ([#551](https://github.com/GlueOps/codespaces/issues/551)) ([68091f8](https://github.com/GlueOps/codespaces/commit/68091f87a4797f2d4e3bba4276d87d66e75ea2c8))
+
 ## [0.155.0](https://github.com/GlueOps/codespaces/compare/v0.154.1...v0.155.0) (2026-08-02)
 
 
