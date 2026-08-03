@@ -359,18 +359,36 @@ dev() {
     [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
 
     # Regional sish endpoint, written by cloud-init from the region's
-    # tunnel_endpoint config. No fallback: every region declares one, and a
-    # VM with no endpoint has nowhere to tunnel, so surface it loudly instead
-    # of connecting somewhere unexpected.
+    # tunnel_endpoint config. No fallback: every region declares one, and the
+    # VM always binds its bare hostname, so a missing endpoint — or the
+    # retired central host, which prefixes the SSH username onto binds — can
+    # only produce an access URL nothing serves. Fail loudly instead.
     TUNNEL_ENDPOINT=""
     if [ -s /etc/glueops/tunnel_endpoint ]; then
         TUNNEL_ENDPOINT="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
     fi
-    if [ -n "$CDE_TOKEN" ] && [ -z "$TUNNEL_ENDPOINT" ]; then
-        gum style --padding "0 1" --foreground=196 --bold \
-            "❌ ERROR:" "/etc/glueops/tunnel_endpoint is missing or empty — this region has no tunnel endpoint configured." >&2
-        return 1
+    if [ -n "$CDE_TOKEN" ]; then
+        if [ -z "$TUNNEL_ENDPOINT" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "/etc/glueops/tunnel_endpoint is missing or empty — this region has no tunnel endpoint configured." >&2
+            return 1
+        fi
+        if [ "$TUNNEL_ENDPOINT" = "tunnels.glueopshosted.com" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "This region still points at the retired central tunnel; it must use a regional endpoint." >&2
+            return 1
+        fi
     fi
+
+    # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
+    # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
+    # older container images that predate cde-boot.
+    # Pass the env at EXEC time (not just the container's frozen create-time --env-file) so a
+    # later profile/secret edit reaches a forced re-run, and secrets are scoped to this exec.
+    ENVFILE_ARG=""
+    [ -f /etc/glueops/codespace.env ] && ENVFILE_ARG="--env-file /etc/glueops/codespace.env"
+    # shellcheck disable=SC2086 # ENVFILE_ARG must word-split into flag + path (or nothing)
+    sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
 
     if [ -n "$CDE_TOKEN" ]; then
         # IdentitiesOnly keeps a forwarded ssh-agent (present when dev is
