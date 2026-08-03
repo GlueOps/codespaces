@@ -367,18 +367,6 @@ dev() {
     if [ -s /etc/glueops/tunnel_endpoint ]; then
         TUNNEL_ENDPOINT="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
     fi
-    if [ -n "$CDE_TOKEN" ]; then
-        if [ -z "$TUNNEL_ENDPOINT" ]; then
-            gum style --padding "0 1" --foreground=196 --bold \
-                "❌ ERROR:" "/etc/glueops/tunnel_endpoint is missing or empty — this region has no tunnel endpoint configured." >&2
-            return 1
-        fi
-        if [ "$TUNNEL_ENDPOINT" = "tunnels.glueopshosted.com" ]; then
-            gum style --padding "0 1" --foreground=196 --bold \
-                "❌ ERROR:" "This region still points at the retired central tunnel; it must use a regional endpoint." >&2
-            return 1
-        fi
-    fi
 
     # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
     # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
@@ -391,6 +379,20 @@ dev() {
     sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
 
     if [ -n "$CDE_TOKEN" ]; then
+        # Validate here, after cde-boot: a bad endpoint costs the tunnel, but
+        # the container bootstrap (gh auth, repo clone, AutoGlue) is unrelated
+        # and must still run — the VM stays reachable over the tailnet.
+        if [ -z "$TUNNEL_ENDPOINT" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "/etc/glueops/tunnel_endpoint is missing or empty — this region has no tunnel endpoint configured." >&2
+            return 1
+        fi
+        if [ "$TUNNEL_ENDPOINT" = "tunnels.glueopshosted.com" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "This region still points at the retired central tunnel; it must use a regional endpoint." >&2
+            return 1
+        fi
+
         # IdentitiesOnly keeps a forwarded ssh-agent (present when dev is
         # re-run from a tmux session after an SSH login) from offering its
         # keys first: sish's TOFU auth permanently pins the first accepted
