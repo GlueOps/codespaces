@@ -39,7 +39,7 @@ ARG VERSION_KREW=0.5.0
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG VERSION_CLAUDE_CODE=2.1.200
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
-ARG VERSION_CLOUDFLARED=2026.6.1
+ARG VERSION_CLOUDFLARED=2026.7.1
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
