@@ -43,10 +43,27 @@ show_diff_table(){
 # It is run as a subprocess by absolute path, not sourced, so nothing in it can leak into this menu shell.
 CAPTAIN_UTILS_CRDS="${CAPTAIN_UTILS_CRDS:-/usr/local/libexec/captain_utils/crds}"
 
+# A cluster is on the platform-crds bundle once its captain repo pins platform_crds_version in VERSIONS/glueops.yaml
+# (written by the terraform module). Captain repos that predate the pin keep the legacy path: ArgoCD's CRDs are
+# applied from upstream by the argocd step, everything else by the ArgoCD Applications. Dev mode has no VERSIONS
+# file, so it is never "on the bundle" here and the argocd step offers Skip instead.
+crds_bundle_enabled() {
+    [ "$environment" = "production" ] || return 1
+    [ -f VERSIONS/glueops.yaml ] || return 1
+    local v
+    v=$(yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml 2>/dev/null) || return 1
+    [ -n "$v" ] && [ "$v" != "null" ]
+}
+
 # menu item "crds" — run BEFORE argocd and AGAIN AFTER argocd (second run is a no-op unless the argocd release removed a CRD).
 # Never propagates a non-zero status into the `set -e` menu loop.
 handle_crds() {
     local v
+    if [ "$environment" = "production" ] && ! crds_bundle_enabled; then
+        gum style --foreground 214 "This cluster is not on the platform-crds bundle yet: VERSIONS/glueops.yaml has no platform_crds_version pin."
+        gum style --foreground 214 "ArgoCD's CRDs are still applied by the argocd step. Bump the terraform module and 'terraform apply' the captain repo to enable the bundle."
+        return 0
+    fi
     if [ ! -x "$CAPTAIN_UTILS_CRDS" ]; then
         gum style --foreground 196 "❌ $CAPTAIN_UTILS_CRDS is missing or not executable — rebuild the codespace image"; return 0
     fi
@@ -131,7 +148,31 @@ handle_argocd() {
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -n \"$namespace\" --allow-unreleased"
         
-        # ArgoCD's CRDs are no longer applied here: they are part of the platform-crds bundle (menu item "crds").
+        # ArgoCD's CRDs: on clusters that pin platform_crds_version they come from the platform-crds bundle (menu
+        # item "crds", run before and after this step) and nothing is applied here. Clusters without the pin keep
+        # the legacy path below: apply ArgoCD's CRDs from upstream before the helm upgrade (the chart runs with
+        # --skip-crds either way).
+        local pre_commands=""
+        local chosen_crd_version=""
+        if crds_bundle_enabled; then
+            gum style --foreground 212 "ArgoCD CRDs are managed by the platform-crds bundle (menu item crds) — not applied by this step."
+        else
+            gum style --bold --foreground 212 "Select ArgoCD App Version (legacy CRD install — this cluster is not on the platform-crds bundle):"
+            local argocd_crd_versions=()
+            if [ "$environment" = "production" ]; then
+                mapfile -t argocd_crd_versions < <(yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml)
+            else
+                mapfile -t argocd_crd_versions < <(helm search repo argo/argo-cd --versions -o json | jq -r --arg v "$version" '.[] | select(.version == $v).app_version')
+            fi
+            chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Skip" "Back")
+            if [ "$chosen_crd_version" = "Back" ]; then
+                return
+            fi
+            if [ "$chosen_crd_version" != "Skip" ]; then
+                pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
+            fi
+        fi
+
         set -x
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
@@ -144,6 +185,18 @@ handle_argocd() {
         # Running helm diff command
         gum style --bold --foreground 212 "The following commands will be executed:"
         
+        # Legacy CRD install (clusters without the platform_crds_version pin only)
+        if [ -n "$pre_commands" ]; then
+            gum style --bold --foreground 212 "Executing pre-commands for $component:"
+            set -x
+            if ! eval "$pre_commands"; then
+                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting."
+                set +x
+                continue # Allow user to retry or go back
+            fi
+            set +x
+            gum style --bold --foreground 212 "✅ Pre-commands complete."
+        fi
         set -x
         helm upgrade --install "$component" "$chart_name" --version "$version" -f "$target_file"  -n "$namespace" --create-namespace --skip-crds
         set +x
