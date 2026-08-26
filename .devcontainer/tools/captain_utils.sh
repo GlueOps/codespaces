@@ -149,7 +149,7 @@ handle_platform_custom() {
     fi
     ref="${ref#"${ref%%[![:space:]]*}"}"; ref="${ref%"${ref##*[![:space:]]}"}"   # trim whitespace
     if [ -z "$ref" ]; then gum style --foreground 196 "no ref given"; return 0; fi
-    case "$ref" in -*) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac
+    case "$ref" in -*|+*) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac   # option / force-refspec prefixes
     if ! git check-ref-format --allow-onelevel "$ref" >/dev/null 2>&1; then
         gum style --foreground 196 "invalid ref '$ref' (branch, tag, full commit SHA or refs/pull/<N>/head)"; return 0
     fi
