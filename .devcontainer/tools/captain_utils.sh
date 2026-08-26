@@ -151,6 +151,7 @@ crds_apply() {   # $1 = version
     local v=$1 wd file difftxt rc=0 total unowned
     crds_valid_version "$v" || return 1
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
+    trap 'rm -rf "$wd"' RETURN
     file=$(crds_fetch "$v" "$wd") || return 1
     total=$(crds_names "$file" | wc -l)
     crds_live_json "$file" "$wd/live.json" || return 1
@@ -176,9 +177,14 @@ crds_apply() {   # $1 = version
         gum style --foreground 196 "❌ some CRDs did not become Established"; return 1
     fi
     crds_strip_last_applied "$file" "$wd" || return 1
-    unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' \
-        <(kubectl get crd --show-managed-fields -o json | jq -c --argjson names "$(crds_names "$file" | jq -R . | jq -sc .)" '[.items[] | select(.metadata.name as $n | $names | index($n))]')) \
+    local names_json n
+    names_json=$(crds_names "$file" | jq -R . | jq -sc .) || return 1
+    kubectl get crd --show-managed-fields -o json \
+        | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$wd/live-owned.json" \
         || { gum style --foreground 196 "❌ ownership check failed"; return 1; }
+    n=$(jq length "$wd/live-owned.json") || return 1
+    if [ "$n" -ne "$total" ]; then gum style --foreground 196 "❌ expected $total bundle CRDs live after apply, found $n"; return 1; fi
+    unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
 }
@@ -192,7 +198,6 @@ handle_crds() {
     return 0
 }
 
-# Function to handle version selection and helm upgrade
 handle_platform_upgrades() {
     # Handle exit option
     if [ "$environment" = "production" ]; then
