@@ -147,11 +147,17 @@ crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does no
 
 # diff -> confirm -> server-side apply (ALWAYS, also when the diff is empty, so field ownership lands on our manager)
 # -> wait Established -> strip leftovers -> assert ownership. Returns 0 on success or operator decline.
+# crds_apply owns the per-run work dir and removes it on every exit path (a RETURN trap would leak into the caller).
 crds_apply() {   # $1 = version
-    local v=$1 wd file difftxt rc=0 total unowned
-    crds_valid_version "$v" || return 1
+    local wd rc=0
+    crds_valid_version "$1" || return 1
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
-    trap 'rm -rf "$wd"' RETURN
+    crds_apply_in "$1" "$wd" || rc=$?
+    rm -rf "$wd"
+    return "$rc"
+}
+crds_apply_in() {   # $1 = version, $2 = work dir
+    local v=$1 wd=$2 file difftxt rc=0 total unowned
     file=$(crds_fetch "$v" "$wd") || return 1
     total=$(crds_names "$file" | wc -l)
     crds_live_json "$file" "$wd/live.json" || return 1
