@@ -1,0 +1,181 @@
+#!/bin/bash
+# captain_utils_crds — the GlueOps layer-0 CRD bundle (GlueOps/platform-crds): diff -> confirm -> server-side apply.
+#
+# Standalone command, deliberately NOT sourced into captain_utils: it is installed as /usr/local/bin/captain_utils_crds
+# by the codespace Dockerfile (every .devcontainer/tools/*.sh lands in /usr/local/bin without the .sh suffix) and
+# captain_utils runs it as a subprocess, exactly like script_captain_utils. Usable on its own (fresh-cluster
+# bootstrap, k3d, e2e) with only kubectl/helm/yq/jq/gum and a kubeconfig.
+#
+# usage:  captain_utils_crds target-version     prints the version to apply, or "Back" (dev: interactive chooser)
+#         captain_utils_crds apply <version>    e.g. apply v1.2.3 — returns 0 on success or operator decline
+# env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
+#         CRDS_CHART (chart ref override), CRDS_AUTO_CONFIRM=yes (skip the confirm prompt), TMPDIR (work dir parent)
+#
+# Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
+set -e -u -o pipefail
+environment="${environment:-production}"
+
+CRDS_CHART="${CRDS_CHART:-oci://ghcr.repo.gpkg.io/glueops/platform-crds}"   # mirror of ghcr.io/glueops/platform-crds
+CRDS_FIELD_MANAGER="glueops-platform-crds"
+
+crds_valid_version() {   # $1 = version; rejects empty/garbage (an empty --version makes helm pull LATEST)
+    if [[ ! "${1:-}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        gum style --foreground 196 "❌ no/invalid platform_crds_version ('${1:-}') — run 'terraform apply' on the captain repo first" >&2
+        return 1
+    fi
+}
+
+crds_target_version() {   # prints a version or "Back"; non-zero when it cannot determine one
+    local tags
+    if [ "$environment" = "production" ]; then
+        yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml
+    else
+        tags=$(gh release list --repo GlueOps/platform-crds --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -) || return 1
+        [ -n "$tags" ] || return 1
+        gum choose $tags "Back"
+    fi
+}
+
+crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered bundle (written atomically)
+    local v=${1#v} out="$2/platform-crds-${1}.yaml"
+    if ! helm show crds "$CRDS_CHART" --version "$v" > "$out.tmp" 2>"$2/fetch.err"; then
+        cat "$2/fetch.err" >&2; return 1
+    fi
+    if [ "$(grep -c '^kind: CustomResourceDefinition' "$out.tmp")" -eq 0 ]; then
+        gum style --foreground 196 "❌ platform-crds $1 rendered no CRDs" >&2; return 1
+    fi
+    mv "$out.tmp" "$out" && echo "$out"
+}
+
+crds_names() { yq -N 'select(.kind=="CustomResourceDefinition") | .metadata.name' "$1"; }
+
+# Live CRD JSON for the bundle's CRDs only (one API call), written to a file (too large for argv/variables).
+crds_live_json() {   # $1 = bundle file, $2 = output file
+    local names_json; names_json=$(crds_names "$1" | jq -R . | jq -sc .) || return 1
+    kubectl get crd -o json | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$2"
+}
+
+# A stored API version that the new bundle no longer declares makes the API server reject the update
+# ("must remain in spec.versions until a storage migration"). Detect it before applying and name the fix.
+crds_storedversions_check() {   # $1 = bundle file, $2 = live json file
+    local bad
+    bad=$(yq -N -o=json -I0 'select(.kind=="CustomResourceDefinition") | {"name": .metadata.name, "versions": [.spec.versions[].name], "served": [.spec.versions[] | select(.served==true) | .name]}' "$1" \
+        | jq -rs --slurpfile livef "$2" '$livef[0] as $live |
+            map({(.name): .}) | add as $b
+            | $live[] | .metadata.name as $n | select($b[$n] != null)
+            | (.status.storedVersions // [])[] as $sv
+            | if ($b[$n].versions | index($sv)) == null then "ERROR \($n) stores \($sv), which platform-crds no longer defines"
+              elif ($b[$n].served | index($sv)) == null then "WARN  \($n) stores \($sv), which is no longer served — migrate storage before the next bump"
+              else empty end') || { gum style --foreground 196 "❌ storedVersions check failed"; return 1; }
+    if grep -q '^ERROR' <<<"$bad"; then
+        gum style --foreground 196 --bold "❌ storage-version migration required before this bundle can be applied:"
+        grep '^ERROR' <<<"$bad" | sed 's/^ERROR /  /'
+        echo "  fix (per CRD):  kubectl get <plural.group> -A -o json | kubectl replace -f -   # rewrites objects at the current storage version"
+        echo "                  kubectl patch crd <name> --subresource=status --type=merge -p '{\"status\":{\"storedVersions\":[\"<remaining>\"]}}'"
+        return 1
+    fi
+    grep '^WARN' <<<"$bad" | sed 's/^WARN  /  ⚠ /' || true
+}
+
+# A CRD still being deleted (e.g. the Gate CRD right after the argocd release dropped it) must be gone before we re-create it.
+crds_wait_terminating() {   # $1 = live json file
+    local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp != null) | .metadata.name' "$1") || return 1
+    if [ -n "$dying" ]; then
+        gum style --foreground 212 "Waiting for terminating CRD(s) to disappear: $(echo $dying)"
+        kubectl wait --for=delete crd $dying --timeout=120s >/dev/null || return 1
+    fi
+}
+
+# Strip stray ArgoCD tracking metadata from the bundle's CRDs (belt-and-braces: Argo has never stamped CRDs —
+# the repo-server skips kube.IsCRD — but a tracked CRD would be auto-pruned once it leaves an app's desired state).
+# NOTE: kubectl.kubernetes.io/last-applied-configuration is deliberately NOT stripped here: kubectl's server-side
+# apply uses it to migrate client-side-apply ownership into our field manager. Leftovers are stripped after the apply.
+crds_strip_argo_tracking() {   # $1 = live json file
+    local ann lab
+    ann=$(jq -r '.[] | select(.metadata.annotations["argocd.argoproj.io/tracking-id"] != null) | .metadata.name' "$1") || return 1
+    lab=$(jq -r '.[] | select(.metadata.labels["argocd.argoproj.io/instance"] != null) | .metadata.name' "$1") || return 1
+    if [ -n "$ann" ]; then
+        gum style --foreground 212 "Removing ArgoCD tracking annotation from: $(echo $ann)"
+        kubectl annotate crd $ann argocd.argoproj.io/tracking-id- >/dev/null || return 1
+    fi
+    if [ -n "$lab" ]; then
+        gum style --foreground 212 "Removing ArgoCD instance label from: $(echo $lab)"
+        kubectl label crd $lab argocd.argoproj.io/instance- >/dev/null || return 1
+    fi
+}
+
+crds_strip_last_applied() {   # $1 = bundle file, $2 = work dir — leftovers after apply (objects kubectl did not migrate)
+    local left
+    crds_live_json "$1" "$2/live-after.json" || return 1
+    left=$(jq -r '.[] | select(.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"] != null) | .metadata.name' "$2/live-after.json") || return 1
+    if [ -n "$left" ]; then
+        kubectl annotate crd $left kubectl.kubernetes.io/last-applied-configuration- >/dev/null || return 1
+    fi
+}
+
+crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does not exist yet diffs from an empty file (single "@@ -0,0" hunk)
+    local new chg
+    new=$(grep -c '^@@ -0,0 ' <<<"$1" || true)
+    chg=$(grep -c '^diff -u -N ' <<<"$1" || true)
+    echo "  $new new, $((chg-new)) changed"
+}
+
+# diff -> confirm -> server-side apply (ALWAYS, also when the diff is empty, so field ownership lands on our manager)
+# -> wait Established -> strip leftovers -> assert ownership. Returns 0 on success or operator decline.
+# crds_apply owns the per-run work dir and removes it on every exit path (a RETURN trap would leak into the caller).
+crds_apply() {   # $1 = version
+    local wd rc=0
+    crds_valid_version "$1" || return 1
+    wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
+    crds_apply_in "$1" "$wd" || rc=$?
+    rm -rf "$wd"
+    return "$rc"
+}
+crds_apply_in() {   # $1 = version, $2 = work dir
+    local v=$1 wd=$2 file difftxt rc=0 total unowned
+    file=$(crds_fetch "$v" "$wd") || return 1
+    total=$(crds_names "$file" | wc -l)
+    crds_live_json "$file" "$wd/live.json" || return 1
+    crds_storedversions_check "$file" "$wd/live.json" || return 1
+    if difftxt=$(kubectl diff --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" 2>&1); then rc=0; else rc=$?; fi
+    if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
+    if [ "$rc" -eq 1 ]; then
+        gum style --bold --foreground 212 "CRD changes for platform-crds $v ($total CRDs in bundle):"; crds_summary "$difftxt"
+        echo "$difftxt" | gum pager
+        if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
+            if ! gum confirm "Apply platform-crds $v?"; then gum style --foreground 212 "Skipped platform-crds $v"; return 0; fi
+        fi
+    else
+        gum style --foreground 212 "No CRD content changes for platform-crds $v ($total CRDs) — applying to record ownership"
+    fi
+    crds_strip_argo_tracking "$wd/live.json" || return 1
+    crds_wait_terminating "$wd/live.json" || return 1
+    echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
+    if ! kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3; then
+        gum style --foreground 196 "❌ CRD apply failed"; return 1
+    fi
+    # shellcheck disable=SC2046   # crds_names output is intentionally word-split into one crd per argument
+    if ! kubectl wait --for=condition=Established crd $(crds_names "$file" | xargs) --timeout=120s > /dev/null; then
+        gum style --foreground 196 "❌ some CRDs did not become Established"; return 1
+    fi
+    crds_strip_last_applied "$file" "$wd" || return 1
+    local names_json n
+    names_json=$(crds_names "$file" | jq -R . | jq -sc .) || return 1
+    kubectl get crd --show-managed-fields -o json \
+        | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$wd/live-owned.json" \
+        || { gum style --foreground 196 "❌ ownership check failed"; return 1; }
+    n=$(jq length "$wd/live-owned.json") || return 1
+    if [ "$n" -ne "$total" ]; then gum style --foreground 196 "❌ expected $total bundle CRDs live after apply, found $n"; return 1; fi
+    unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
+    if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
+    gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
+}
+
+usage() { echo "usage: captain_utils_crds target-version | apply <version>   (see the header of this file)"; }
+
+case "${1:-}" in
+    target-version) crds_target_version ;;
+    apply)          crds_apply "${2:-}" ;;
+    -h|--help)      usage ;;
+    *)              usage >&2; exit 2 ;;
+esac
