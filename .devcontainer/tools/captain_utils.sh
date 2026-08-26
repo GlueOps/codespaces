@@ -95,10 +95,15 @@ handle_platform_upgrades() {
             gum style --foreground 196 --bold "No Overrides.yaml detected"
             overrides_file="platform.yaml"
         fi
-        version=$(gum choose "${versions[@]}" "Back")
+        version=$(gum choose "${versions[@]}" "custom" "Back")
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
+            return
+        fi
+        # custom: install the chart from a git ref of GlueOps/platform-helm-chart-platform (feature-branch testing)
+        if [ "$version" = "custom" ]; then
+            handle_platform_custom "$overrides_file"
             return
         fi
         echo "chosen version: $version for $chart_name"
@@ -122,6 +127,78 @@ handle_platform_upgrades() {
         set +x
         return 
     done
+}
+
+# ---- glueops-platform "custom": install the platform chart from a git ref ----
+# For feature-branch testing: the chart is a plain directory chart with no dependencies, so helm can diff/upgrade it
+# straight from a checkout. Flow: ask for a branch, tag or full commit SHA of GlueOps/platform-helm-chart-platform ->
+# fresh shallow clone under $TMPDIR -> show the resolved commit + Chart.yaml version -> the same diff -> confirm ->
+# upgrade flow as the pinned path (keep the helm lines in sync with handle_platform_upgrades) -> delete the clone.
+# The release is stamped with --description "custom: <ref>@<sha>" so `helm history glueops-platform -n glueops-core`
+# shows what is really installed. Never propagates a non-zero status into the `set -e` menu loop.
+PLATFORM_CHART_REPO="${PLATFORM_CHART_REPO:-https://github.com/GlueOps/platform-helm-chart-platform.git}"
+
+handle_platform_custom() {
+    local overrides_file="$1"
+    local ref wd
+    if [ "$environment" = "production" ]; then
+        gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster: the VERSIONS/glueops.yaml pin will no longer describe what is running (show_diff_table will report drift)."
+    fi
+    if ! ref=$(gum input --prompt "ref> " --placeholder "branch, tag or full commit SHA of GlueOps/platform-helm-chart-platform"); then
+        return 0
+    fi
+    ref="${ref#"${ref%%[![:space:]]*}"}"; ref="${ref%"${ref##*[![:space:]]}"}"   # trim whitespace
+    if [ -z "$ref" ]; then gum style --foreground 196 "no ref given"; return 0; fi
+    case "$ref" in -*|*..*|*/) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac
+    if ! wd=$(mktemp -d "${TMPDIR:-/tmp}/glueops-platform-custom.XXXXXX"); then
+        gum style --foreground 196 "❌ could not create a work directory"; return 0
+    fi
+    handle_platform_custom_in "$wd" "$ref" "$overrides_file" || true
+    rm -rf "$wd"
+    return 0
+}
+
+handle_platform_custom_in() {
+    local wd="$1" ref="$2" overrides_file="$3"
+    local target_file="platform.yaml" namespace="glueops-core"
+    local sha subject chart_version
+    if ! ( cd "$wd" && git init -q && git fetch -q --depth 1 "$PLATFORM_CHART_REPO" "$ref" && git checkout -q FETCH_HEAD ); then
+        gum style --foreground 196 "❌ could not fetch '$ref' from $PLATFORM_CHART_REPO (branch, tag or full commit SHA?)"
+        return 1
+    fi
+    if [ ! -f "$wd/Chart.yaml" ]; then
+        gum style --foreground 196 "❌ '$ref' has no Chart.yaml at the repo root"; return 1
+    fi
+    sha=$(git -C "$wd" rev-parse --short HEAD)
+    subject=$(git -C "$wd" log -1 --format='%s (%ci)')
+    chart_version=$(yq '.version' "$wd/Chart.yaml")
+    gum style --foreground 212 --bold "checked out $ref @ $sha — $subject"
+    gum style "Chart.yaml version: $chart_version (the release will carry this version, description: custom: $ref@$sha)"
+    if ! gum confirm "Diff this chart against the cluster?"; then
+        return 0
+    fi
+
+    set -x
+    if ! helm diff --color upgrade "$component" "$wd" -f "$target_file" -f "$overrides_file" -n "$namespace" --allow-unreleased | gum pager; then
+        set +x
+        gum style --foreground 196 "❌ helm diff failed"; return 1
+    fi
+    set +x
+    gum style --bold --foreground 212 "✅ Diff complete."
+
+    if ! gum confirm "Apply upgrade"; then
+        return 0
+    fi
+
+    gum style --bold --foreground 212 "The following commands will be executed:"
+    set -x
+    if ! helm upgrade --install "$component" "$wd" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --description "custom: $ref@$sha"; then
+        set +x
+        gum style --foreground 196 "❌ helm upgrade failed"; return 1
+    fi
+    set +x
+    gum style --bold --foreground 212 "✅ $component installed from $ref @ $sha (helm history $component -n $namespace shows the description)"
+    return 0
 }
 
 handle_argocd() {
