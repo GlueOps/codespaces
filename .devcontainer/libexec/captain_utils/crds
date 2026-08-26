@@ -1,13 +1,14 @@
 #!/bin/bash
-# captain_utils_crds — the GlueOps layer-0 CRD bundle (GlueOps/platform-crds): diff -> confirm -> server-side apply.
+# captain_utils/crds — the GlueOps layer-0 CRD bundle (GlueOps/platform-crds): diff -> confirm -> server-side apply.
 #
-# Standalone command, deliberately NOT sourced into captain_utils: it is installed as /usr/local/bin/captain_utils_crds
-# by the codespace Dockerfile (every .devcontainer/tools/*.sh lands in /usr/local/bin without the .sh suffix) and
-# captain_utils runs it as a subprocess, exactly like script_captain_utils. Usable on its own (fresh-cluster
-# bootstrap, k3d, e2e) with only kubectl/helm/yq/jq/gum and a kubeconfig.
+# Internal helper of captain_utils, deliberately kept OFF the PATH: the codespace Dockerfile installs it as
+# /usr/local/libexec/captain_utils/crds (libexec = binaries not meant to be run directly by users), and captain_utils
+# runs it as a subprocess by absolute path from the `crds` menu item — nothing in here is sourced into the menu shell.
+# It is still usable on its own when you mean it (fresh-cluster bootstrap, k3d, e2e) with only kubectl/helm/yq/jq/gum
+# and a kubeconfig:
 #
-# usage:  captain_utils_crds target-version     prints the version to apply, or "Back" (dev: interactive chooser)
-#         captain_utils_crds apply <version>    e.g. apply v1.2.3 — returns 0 on success or operator decline
+# usage:  /usr/local/libexec/captain_utils/crds target-version   prints the version to apply, or "Back" (dev: chooser)
+#         /usr/local/libexec/captain_utils/crds apply <version>  e.g. apply v0.0.1 — returns 0 on success or decline
 # env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
 #         CRDS_CHART (chart ref override), CRDS_AUTO_CONFIRM=yes (skip the confirm prompt), TMPDIR (work dir parent)
 #
@@ -171,7 +172,7 @@ crds_apply_in() {   # $1 = version, $2 = work dir
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
 }
 
-usage() { echo "usage: captain_utils_crds target-version | apply <version>   (see the header of this file)"; }
+usage() { echo "usage: captain_utils/crds target-version | apply <version>   (see the header of this file)"; }
 
 case "${1:-}" in
     target-version) crds_target_version ;;

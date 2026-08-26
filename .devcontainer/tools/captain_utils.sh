@@ -38,10 +38,10 @@ show_diff_table(){
 }
 
 # ---- layer-0 CRD bundle (GlueOps/platform-crds) ----
-# The CRD logic lives in its own command, captain_utils_crds (.devcontainer/tools/captain_utils_crds.sh, installed to
-# /usr/local/bin by the Dockerfile like script_captain_utils). It is run as a subprocess, not sourced, so nothing in it
-# can leak into this menu loop; the only shared convention is $environment. No per-CRD knowledge lives here.
-CAPTAIN_UTILS_CRDS="${CAPTAIN_UTILS_CRDS:-/usr/local/bin/captain_utils_crds}"
+# The CRD logic lives in its own internal command (.devcontainer/libexec/captain_utils/crds, installed by the
+# Dockerfile to /usr/local/libexec/captain_utils/crds — deliberately OFF the PATH so nobody runs it by accident).
+# It is run as a subprocess by absolute path, not sourced, so nothing in it can leak into this menu shell.
+CAPTAIN_UTILS_CRDS="${CAPTAIN_UTILS_CRDS:-/usr/local/libexec/captain_utils/crds}"
 
 # menu item "crds" — run BEFORE argocd and AGAIN AFTER argocd (second run is a no-op unless the argocd release removed a CRD).
 # Never propagates a non-zero status into the `set -e` menu loop.
