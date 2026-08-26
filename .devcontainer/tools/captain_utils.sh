@@ -142,14 +142,17 @@ handle_platform_custom() {
     local overrides_file="$1"
     local ref wd
     if [ "$environment" = "production" ]; then
-        gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster: the VERSIONS/glueops.yaml pin will no longer describe what is running (show_diff_table will report drift)."
+        gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster. The VERSIONS/glueops.yaml pin will no longer describe what is running, and show_diff_table will usually NOT show it (feature branches keep main's Chart.yaml version) — 'helm history $component -n glueops-core' is the only record. Re-run glueops-platform with the pinned version to get back."
     fi
-    if ! ref=$(gum input --prompt "ref> " --placeholder "branch, tag or full commit SHA of GlueOps/platform-helm-chart-platform"); then
+    if ! ref=$(gum input --header "GlueOps/platform-helm-chart-platform ref: branch, tag, full commit SHA, or refs/pull/<N>/head" --prompt "ref> " --placeholder "feat/my-branch"); then
         return 0
     fi
     ref="${ref#"${ref%%[![:space:]]*}"}"; ref="${ref%"${ref##*[![:space:]]}"}"   # trim whitespace
     if [ -z "$ref" ]; then gum style --foreground 196 "no ref given"; return 0; fi
-    case "$ref" in -*|*..*|*/) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac
+    case "$ref" in -*) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac
+    if ! git check-ref-format --allow-onelevel "$ref" >/dev/null 2>&1; then
+        gum style --foreground 196 "invalid ref '$ref' (branch, tag, full commit SHA or refs/pull/<N>/head)"; return 0
+    fi
     if ! wd=$(mktemp -d "${TMPDIR:-/tmp}/glueops-platform-custom.XXXXXX"); then
         gum style --foreground 196 "❌ could not create a work directory"; return 0
     fi
@@ -162,18 +165,20 @@ handle_platform_custom_in() {
     local wd="$1" ref="$2" overrides_file="$3"
     local target_file="platform.yaml" namespace="glueops-core"
     local sha subject chart_version
-    if ! ( cd "$wd" && git init -q && git fetch -q --depth 1 "$PLATFORM_CHART_REPO" "$ref" && git checkout -q FETCH_HEAD ); then
+    # plain git, whatever the operator's shell exports (an exported GIT_DIR would otherwise point these at the captain repo)
+    cgit() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY GIT_TERMINAL_PROMPT=0 git "$@"; }
+    if ! ( cd "$wd" && cgit init -q && cgit fetch -q --depth 1 "$PLATFORM_CHART_REPO" "$ref" && cgit checkout -q FETCH_HEAD ); then
         gum style --foreground 196 "❌ could not fetch '$ref' from $PLATFORM_CHART_REPO (branch, tag or full commit SHA?)"
         return 1
     fi
     if [ ! -f "$wd/Chart.yaml" ]; then
         gum style --foreground 196 "❌ '$ref' has no Chart.yaml at the repo root"; return 1
     fi
-    sha=$(git -C "$wd" rev-parse --short HEAD)
-    subject=$(git -C "$wd" log -1 --format='%s (%ci)')
+    sha=$(cgit -C "$wd" rev-parse --short HEAD)
+    subject=$(cgit -C "$wd" log -1 --format='%s (%ci)')
     chart_version=$(yq '.version' "$wd/Chart.yaml")
     gum style --foreground 212 --bold "checked out $ref @ $sha — $subject"
-    gum style "Chart.yaml version: $chart_version (the release will carry this version, description: custom: $ref@$sha)"
+    gum style "Chart.yaml version: $chart_version (helm list will show $component-$chart_version; the custom ref is recorded only in the release description: custom: $ref@$sha)"
     if ! gum confirm "Diff this chart against the cluster?"; then
         return 0
     fi
