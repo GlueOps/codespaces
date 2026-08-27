@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.0](https://github.com/GlueOps/codespaces/compare/v0.157.0...v0.158.0) (2026-08-27)
+
+
+### Features
+
+* converge CRDs on the bundle with apply followed by replace ([#569](https://github.com/GlueOps/codespaces/issues/569)) ([8ecfbe1](https://github.com/GlueOps/codespaces/commit/8ecfbe1f88e106c75dd5b6b50fc427a3d3bdb2e0))
+
 ## [0.157.0](https://github.com/GlueOps/codespaces/compare/v0.156.0...v0.157.0) (2026-08-27)
 
 
