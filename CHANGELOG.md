@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.0](https://github.com/GlueOps/codespaces/compare/v0.156.0...v0.157.0) (2026-08-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* needs platform-crds >= 0.1.0 for profiles. Older bundles still work (no subcharts, no schema: every CRD renders), so the two can be released in any order.
+
+### Features
+
+* select CRD profiles from the cluster's platform.yaml ([#567](https://github.com/GlueOps/codespaces/issues/567)) ([6ea4323](https://github.com/GlueOps/codespaces/commit/6ea4323c024e075cbd348cb46d8144a266f7f12f))
+
 ## [0.156.0](https://github.com/GlueOps/codespaces/compare/v0.155.1...v0.156.0) (2026-08-27)
 
 
