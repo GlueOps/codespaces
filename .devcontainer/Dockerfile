@@ -304,5 +304,21 @@ RUN cde-trust-serve-web \
 USER root
 RUN mkdir -p /home/vscode/.kube && chmod 0700 /home/vscode/.kube
 RUN chown -R vscode:vscode /home/vscode
+
+# Build metadata baked into the image as env vars (available in any run path,
+# including the plain `docker run` in developer-setup.sh -- not just when the
+# image is launched as a devcontainer). Values are supplied as build args by
+# .github/workflows/build_and_publish_devcontainer.yml via devcontainer.json.
+# Kept at the very end of the build so these per-commit values don't invalidate
+# the cache of the (expensive) tool-install layers above.
+ARG COMMIT_SHA=UNKNOWN
+ARG SHORT_SHA=UNKNOWN
+ARG BUILD_TIMESTAMP=UNKNOWN
+ARG GIT_REF=UNKNOWN
+ENV COMMIT_SHA=${COMMIT_SHA}
+ENV SHORT_SHA=${SHORT_SHA}
+ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
+ENV GIT_REF=${GIT_REF}
+
 ENTRYPOINT [ "/usr/local/share/docker-init.sh" ]
 CMD [ "sleep", "infinity" ]
