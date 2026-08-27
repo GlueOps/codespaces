@@ -75,8 +75,9 @@ handle_crds() {
     if [ ! -x "$CAPTAIN_UTILS_CRDS" ]; then
         gum style --foreground 196 "❌ $CAPTAIN_UTILS_CRDS is missing or not executable — rebuild the codespace image"; return 0
     fi
-    # env -u: an operator's leftover CRDS_CHART / CRDS_AUTO_CONFIRM must not redirect or auto-confirm the pinned run
-    if ! v=$(env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
+    # env -u: an operator's leftover CRDS_AUTO_CONFIRM must not skip the confirm. CRDS_CHART stays overridable (e2e runs
+    # the menu against an unpublished bundle); the command prints the source it used and refuses a directory here.
+    if ! v=$(env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
     if [ "$v" = "Back" ]; then return 0; fi
     if [ "$environment" = "production" ]; then
         choice=$(gum choose "$v" "custom" "Back") || return 0   # dev: the release chooser inside target-version already offers custom
@@ -93,10 +94,10 @@ handle_crds() {
             gum style "Local platform-crds directory — a checkout of GlueOps/platform-crds with crds/ rendered (Tab completes, empty = back, Ctrl-C exits captain_utils):"
             if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
             if [ -z "$dir" ]; then return 0; fi
-            if ! env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
+            if ! env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
             ;;
         *)
-            if ! env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
+            if ! env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
             ;;
     esac
     return 0
