@@ -58,7 +58,7 @@ crds_bundle_enabled() {
 # menu item "crds" — run BEFORE argocd and AGAIN AFTER argocd (second run is a no-op unless the argocd release removed a CRD).
 # Never propagates a non-zero status into the `set -e` menu loop.
 handle_crds() {
-    local v
+    local v choice dir
     if [ "$environment" = "production" ] && ! crds_bundle_enabled; then
         gum style --foreground 214 "This cluster is not on the platform-crds bundle yet: VERSIONS/glueops.yaml has no platform_crds_version pin."
         gum style --foreground 214 "ArgoCD's CRDs are still applied by the argocd step. Bump the terraform module and 'terraform apply' the captain repo to enable the bundle."
@@ -69,7 +69,27 @@ handle_crds() {
     fi
     if ! v=$(environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
     if [ "$v" = "Back" ]; then return 0; fi
-    if ! environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
+    if [ "$environment" = "production" ]; then
+        choice=$(gum choose "$v" "custom" "Back")   # dev: the release chooser inside target-version already offers custom
+    else
+        choice="$v"
+    fi
+    case "$choice" in
+        Back) return 0 ;;
+        custom)
+            # custom: apply the bundle from a local checkout of GlueOps/platform-crds (after hack/render.sh)
+            if [ "$environment" = "production" ]; then
+                gum style --foreground 196 --bold "⚠️  custom applies UNRELEASED CRDs to this cluster. Nothing records it afterwards (same field manager as the pinned bundle) — the next pinned run's diff shows what it changed."
+            fi
+            gum style "Local platform-crds directory — a checkout of GlueOps/platform-crds with crds/ rendered (Tab completes, empty = back):"
+            if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
+            if [ -z "$dir" ]; then return 0; fi
+            if ! environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
+            ;;
+        *)
+            if ! environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
+            ;;
+    esac
     return 0
 }
 
@@ -101,7 +121,7 @@ handle_platform_upgrades() {
         if [ "$version" = "Back" ]; then
             return
         fi
-        # custom: install the chart from a git ref of GlueOps/platform-helm-chart-platform (feature-branch testing)
+        # custom: install the chart from a local directory (feature testing)
         if [ "$version" = "custom" ]; then
             handle_platform_custom "$overrides_file"
             return
@@ -129,62 +149,75 @@ handle_platform_upgrades() {
     done
 }
 
-# ---- glueops-platform "custom": install the platform chart from a git ref ----
-# For feature-branch testing: the chart is a plain directory chart with no dependencies, so helm can diff/upgrade it
-# straight from a checkout. Flow: ask for a branch, tag or full commit SHA of GlueOps/platform-helm-chart-platform ->
-# fresh shallow clone under $TMPDIR -> show the resolved commit + Chart.yaml version -> the same diff -> confirm ->
-# upgrade flow as the pinned path (keep the helm lines in sync with handle_platform_upgrades) -> delete the clone.
-# The release is stamped with --description "custom: <ref>@<sha>" so `helm history glueops-platform -n glueops-core`
-# shows what is really installed. Never propagates a non-zero status into the `set -e` menu loop.
-PLATFORM_CHART_REPO="${PLATFORM_CHART_REPO:-https://github.com/GlueOps/platform-helm-chart-platform.git}"
+# ---- "custom": local directories for feature testing ----
+# ask_dir PREFILL — readline path prompt (Tab completes paths, Ctrl-U clears the prefill, empty line = back).
+# Prints the absolute path (~ expanded, relative resolved against $PWD, trailing / dropped); prints nothing on empty
+# input; returns 1 on EOF. When stdin is not a terminal, read -e degrades to a plain read (scriptable).
+ask_dir() {
+    local d
+    read -e -r -i "$1" -p "path> " d || return 1
+    d="${d/#\~/$HOME}"; d="${d%/}"
+    [ -n "$d" ] || return 0
+    ( cd "$d" 2>/dev/null && pwd -P ) || printf '%s\n' "$d"
+}
+
+# dir_git_info DIR — "branch@sha" plus ", dirty" when DIR is inside a git checkout with uncommitted changes; empty
+# otherwise. GIT_DIR/GIT_WORK_TREE are dropped so an operator's exported values cannot point this at the captain repo.
+dir_git_info() {
+    local dir="$1" branch sha dirty=""
+    g() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir" "$@"; }
+    g rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    sha=$(g rev-parse --short HEAD 2>/dev/null) || return 0
+    branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    [ -z "$(g status --porcelain 2>/dev/null)" ] || dirty=", dirty"
+    printf '%s@%s%s' "$branch" "$sha" "$dirty"
+}
+
+# ---- glueops-platform "custom": install the platform chart from a local directory ----
+# For testing local changes: point at a checkout of GlueOps/platform-helm-chart-platform (the chart has no
+# dependencies, so helm diffs/upgrades it straight from the directory, .helmignore respected). Flow: path prompt ->
+# show path, chart name/version and branch@sha (+dirty) -> confirm -> the same diff -> confirm -> upgrade flow as the
+# pinned path (keep the helm lines in sync with handle_platform_upgrades). The release is stamped with
+# --description "custom: <dir> (<branch>@<sha>[, dirty])" so `helm history glueops-platform -n glueops-core` shows what
+# is really installed (per revision: the next pinned upgrade records "Upgrade complete" again). Never propagates a
+# non-zero status into the `set -e` menu loop.
+PLATFORM_CHART_DIR_PREFILL="${PLATFORM_CHART_DIR_PREFILL:-/workspaces/}"
 
 handle_platform_custom() {
     local overrides_file="$1"
-    local ref wd
+    local dir
     if [ "$environment" = "production" ]; then
         gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster. The VERSIONS/glueops.yaml pin will no longer describe what is running, and show_diff_table will usually NOT show it (feature branches keep main's Chart.yaml version) — 'helm history $component -n glueops-core' is the only record. Re-run glueops-platform with the pinned version to get back."
     fi
-    if ! ref=$(gum input --header "GlueOps/platform-helm-chart-platform ref: branch, tag, full commit SHA, or refs/pull/<N>/head" --prompt "ref> " --placeholder "feat/my-branch"); then
-        return 0
-    fi
-    ref="${ref#"${ref%%[![:space:]]*}"}"; ref="${ref%"${ref##*[![:space:]]}"}"   # trim whitespace
-    if [ -z "$ref" ]; then gum style --foreground 196 "no ref given"; return 0; fi
-    case "$ref" in -*|+*) gum style --foreground 196 "invalid ref '$ref'"; return 0;; esac   # option / force-refspec prefixes
-    if ! git check-ref-format --allow-onelevel "$ref" >/dev/null 2>&1; then
-        gum style --foreground 196 "invalid ref '$ref' (branch, tag, full commit SHA or refs/pull/<N>/head)"; return 0
-    fi
-    if ! wd=$(mktemp -d "${TMPDIR:-/tmp}/glueops-platform-custom.XXXXXX"); then
-        gum style --foreground 196 "❌ could not create a work directory"; return 0
-    fi
-    handle_platform_custom_in "$wd" "$ref" "$overrides_file" || true
-    rm -rf "$wd"
+    gum style "Local chart directory — a checkout of GlueOps/platform-helm-chart-platform (Tab completes, empty = back):"
+    if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
+    if [ -z "$dir" ]; then return 0; fi
+    handle_platform_custom_dir "$dir" "$overrides_file" || true
     return 0
 }
 
-handle_platform_custom_in() {
-    local wd="$1" ref="$2" overrides_file="$3"
+handle_platform_custom_dir() {
+    local dir="$1" overrides_file="$2"
     local target_file="platform.yaml" namespace="glueops-core"
-    local sha subject chart_version
-    # plain git, whatever the operator's shell exports (an exported GIT_DIR would otherwise point these at the captain repo)
-    cgit() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY GIT_TERMINAL_PROMPT=0 git "$@"; }
-    if ! ( cd "$wd" && cgit init -q && cgit fetch -q --depth 1 "$PLATFORM_CHART_REPO" "$ref" && cgit checkout -q FETCH_HEAD ); then
-        gum style --foreground 196 "❌ could not fetch '$ref' from $PLATFORM_CHART_REPO (branch, tag or full commit SHA?)"
-        return 1
+    local chart_name chart_version git_info
+    if [ ! -d "$dir" ]; then gum style --foreground 196 "❌ '$dir' is not a directory"; return 1; fi
+    if [ ! -f "$dir/Chart.yaml" ]; then
+        gum style --foreground 196 "❌ '$dir' has no Chart.yaml — point at a checkout of GlueOps/platform-helm-chart-platform"; return 1
     fi
-    if [ ! -f "$wd/Chart.yaml" ]; then
-        gum style --foreground 196 "❌ '$ref' has no Chart.yaml at the repo root"; return 1
+    chart_name=$(yq '.name' "$dir/Chart.yaml")
+    chart_version=$(yq '.version' "$dir/Chart.yaml")
+    git_info=$(dir_git_info "$dir")
+    gum style --foreground 212 --bold "chart $chart_name $chart_version from $dir${git_info:+ ($git_info)}"
+    if [ "$chart_name" != "$component" ]; then
+        gum style --foreground 214 "note: Chart.yaml name is '$chart_name' but it will be installed as release '$component' in $namespace"
     fi
-    sha=$(cgit -C "$wd" rev-parse --short HEAD)
-    subject=$(cgit -C "$wd" log -1 --format='%s (%ci)')
-    chart_version=$(yq '.version' "$wd/Chart.yaml")
-    gum style --foreground 212 --bold "checked out $ref @ $sha — $subject"
-    gum style "Chart.yaml version: $chart_version (helm list will show $component-$chart_version; the custom ref is recorded only in the release description: custom: $ref@$sha)"
+    gum style "helm list will show $component-$chart_version; the directory is recorded only in the release description: custom: $dir${git_info:+ ($git_info)}"
     if ! gum confirm "Diff this chart against the cluster?"; then
         return 0
     fi
 
     set -x
-    if ! helm diff --color upgrade "$component" "$wd" -f "$target_file" -f "$overrides_file" -n "$namespace" --allow-unreleased | gum pager; then
+    if ! helm diff --color upgrade "$component" "$dir" -f "$target_file" -f "$overrides_file" -n "$namespace" --allow-unreleased | gum pager; then
         set +x
         gum style --foreground 196 "❌ helm diff failed"; return 1
     fi
@@ -197,12 +230,12 @@ handle_platform_custom_in() {
 
     gum style --bold --foreground 212 "The following commands will be executed:"
     set -x
-    if ! helm upgrade --install "$component" "$wd" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --description "custom: $ref@$sha"; then
+    if ! helm upgrade --install "$component" "$dir" -f "$target_file" -f "$overrides_file" -n "$namespace" --create-namespace --description "custom: $dir${git_info:+ ($git_info)}"; then
         set +x
         gum style --foreground 196 "❌ helm upgrade failed"; return 1
     fi
     set +x
-    gum style --bold --foreground 212 "✅ $component installed from $ref @ $sha (helm history $component -n $namespace shows the description)"
+    gum style --bold --foreground 212 "✅ $component installed from $dir (helm history $component -n $namespace shows the description)"
     return 0
 }
 

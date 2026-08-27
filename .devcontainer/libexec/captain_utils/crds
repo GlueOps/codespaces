@@ -7,8 +7,10 @@
 # It is still usable on its own when you mean it (fresh-cluster bootstrap, k3d, e2e) with only kubectl/helm/yq/jq/gum
 # and a kubeconfig:
 #
-# usage:  /usr/local/libexec/captain_utils/crds target-version   prints the version to apply, or "Back" (dev: chooser)
+# usage:  /usr/local/libexec/captain_utils/crds target-version   prints the version to apply, "custom" or "Back" (dev: chooser)
 #         /usr/local/libexec/captain_utils/crds apply <version>  e.g. apply v0.0.1 — returns 0 on success or decline
+#         /usr/local/libexec/captain_utils/crds apply-dir <dir>  same flow from a local GlueOps/platform-crds checkout
+#                                                                (Chart.yaml + crds/ as rendered by hack/render.sh)
 # env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
 #         CRDS_CHART (chart ref override), CRDS_AUTO_CONFIRM=yes (skip the confirm prompt), TMPDIR (work dir parent)
 #
@@ -33,13 +35,15 @@ crds_target_version() {   # prints a version or "Back"; non-zero when it cannot 
     else
         tags=$(gh release list --repo GlueOps/platform-crds --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -) || return 1
         [ -n "$tags" ] || return 1
-        gum choose $tags "Back"
+        gum choose $tags "custom" "Back"
     fi
 }
 
 crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered bundle (written atomically)
     local v=${1#v} out="$2/platform-crds-${1}.yaml"
-    if ! helm show crds "$CRDS_CHART" --version "$v" > "$out.tmp" 2>"$2/fetch.err"; then
+    local -a version_arg=(--version "$v")
+    [ -d "$CRDS_CHART" ] && version_arg=()   # a local chart directory (apply-dir) has no version to select
+    if ! helm show crds "$CRDS_CHART" "${version_arg[@]}" > "$out.tmp" 2>"$2/fetch.err"; then
         cat "$2/fetch.err" >&2; return 1
     fi
     if [ "$(grep -c '^kind: CustomResourceDefinition' "$out.tmp")" -eq 0 ]; then
@@ -132,7 +136,32 @@ crds_apply() {   # $1 = version
     rm -rf "$wd"
     return "$rc"
 }
-crds_apply_in() {   # $1 = version, $2 = work dir
+crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); runs the pinned flow with the bundle rendered from it
+    local dir="$1" wd rc=0 name git_info
+    if [ -z "$dir" ] || [ ! -d "$dir" ]; then gum style --foreground 196 "❌ '$dir' is not a directory"; return 1; fi
+    dir=$(cd "$dir" && pwd -P)
+    if [ ! -f "$dir/Chart.yaml" ] || [ -z "$(ls "$dir"/crds/*.yaml 2>/dev/null)" ]; then
+        gum style --foreground 196 "❌ '$dir' is not a rendered platform-crds checkout (needs Chart.yaml and crds/*.yaml — run hack/render.sh)"; return 1
+    fi
+    name=$(yq '.name' "$dir/Chart.yaml")
+    if [ "$name" != "platform-crds" ]; then gum style --foreground 196 "❌ '$dir/Chart.yaml' is chart '$name', not platform-crds"; return 1; fi
+    git_info=$(crds_dir_git_info "$dir")
+    gum style --foreground 212 --bold "platform-crds $(yq '.version' "$dir/Chart.yaml") from $dir${git_info:+ ($git_info)} — $(ls "$dir"/crds/*.yaml | wc -l) CRD files"
+    wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
+    CRDS_CHART="$dir" crds_apply_in "local" "$wd" || rc=$?
+    rm -rf "$wd"
+    return "$rc"
+}
+crds_dir_git_info() {   # $1 = dir; "branch@sha[, dirty]" when inside a git checkout, empty otherwise (operator GIT_DIR ignored)
+    local dir="$1" branch sha dirty=""
+    g() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir" "$@"; }
+    g rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    sha=$(g rev-parse --short HEAD 2>/dev/null) || return 0
+    branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    [ -z "$(g status --porcelain 2>/dev/null)" ] || dirty=", dirty"
+    printf '%s@%s%s' "$branch" "$sha" "$dirty"
+}
+crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     local v=$1 wd=$2 file difftxt rc=0 total unowned
     file=$(crds_fetch "$v" "$wd") || return 1
     total=$(crds_names "$file" | wc -l)
@@ -172,11 +201,12 @@ crds_apply_in() {   # $1 = version, $2 = work dir
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
 }
 
-usage() { echo "usage: captain_utils/crds target-version | apply <version>   (see the header of this file)"; }
+usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir>   (see the header of this file)"; }
 
 case "${1:-}" in
     target-version) crds_target_version ;;
     apply)          crds_apply "${2:-}" ;;
+    apply-dir)      crds_apply_dir "${2:-}" ;;
     -h|--help)      usage ;;
     *)              usage >&2; exit 2 ;;
 esac
