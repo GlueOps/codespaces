@@ -17,6 +17,9 @@
 # CRD profiles: which CRDs a cluster installs is selected from ./platform.yaml (production requires it; dev without one
 # installs every profile). The chart makes every profile key mandatory, so a renamed key fails instead of dropping CRDs.
 #
+# Apply model: `kubectl apply --server-side` (creates, and takes field ownership) immediately followed by
+# `kubectl replace` (makes each CRD exactly the bundle, removing metadata a previous installer left behind).
+#
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
 unset KUBECTL_EXTERNAL_DIFF   # the exit code and hunk headers parsed below assume kubectl's built-in diff
@@ -150,13 +153,25 @@ crds_strip_argo_tracking() {   # $1 = live json file
     fi
 }
 
-crds_strip_last_applied() {   # $1 = bundle file, $2 = work dir — leftovers after apply (objects kubectl did not migrate)
-    local left
-    crds_live_json "$1" "$2/live-after.json" || return 1
-    left=$(jq -r '.[] | select(.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"] != null) | .metadata.name' "$2/live-after.json") || return 1
-    if [ -n "$left" ]; then
-        kubectl annotate crd $left kubectl.kubernetes.io/last-applied-configuration- >/dev/null || return 1
-    fi
+# crds_metadata_drift BUNDLE LIVE_JSON — labels/annotations the live CRDs carry that the bundle does not ship.
+# The apply cannot remove these: server-side apply only manages fields it sets. The replace that follows does.
+# Shown before the confirm because `kubectl diff` models apply and would not reveal them.
+crds_metadata_drift() {
+    yq -N -o=json -I0 'select(type == "!!map" and .kind=="CustomResourceDefinition") | {"n": .metadata.name, "l": (.metadata.labels // {} | keys), "a": (.metadata.annotations // {} | keys)}' "$1" \
+      | jq -rs --slurpfile livef "$2" '$livef[0] as $live
+          | map(select(.n != null)) | map({(.n): .}) | add as $b
+          | $live[] | .metadata.name as $n | select($b[$n] != null)
+          | (((.metadata.labels // {}) | keys) - $b[$n].l) as $dl
+          | (((.metadata.annotations // {}) | keys) - $b[$n].a) as $da
+          | (if ($dl|length) > 0 then "  \($n) [labels] \($dl|join(" "))" else empty end),
+            (if ($da|length) > 0 then "  \($n) [annotations] \($da|join(" "))" else empty end)'
+}
+
+crds_show_drift() {   # $1 = bundle file, $2 = work dir
+    local drift; drift=$(crds_metadata_drift "$1" "$2/live.json" 2>/dev/null || true)
+    [ -n "$drift" ] || return 0
+    gum style --foreground 214 "metadata these CRDs carry that the bundle does not ship — the replace step removes it (the diff above cannot show this):"
+    printf '%s\n' "$drift"
 }
 
 crds_scope() {   # $1 = work dir, $2 = CRDs selected for this cluster; "83 of 85 — some profiles off" when they differ
@@ -228,6 +243,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
     if [ "$rc" -eq 1 ]; then
         gum style --bold --foreground 212 "CRD changes for platform-crds $v ($(crds_scope "$wd" "$total")):"; crds_summary "$difftxt"
+        crds_show_drift "$file" "$wd"
         if [ -t 1 ]; then echo "$difftxt" | gum pager; else echo "$difftxt"; fi
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
             if ! gum confirm "Apply platform-crds $v?"; then
@@ -237,18 +253,29 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
         fi
     else
         gum style --foreground 212 "No CRD content changes for platform-crds $v ($(crds_scope "$wd" "$total")) — applying to record ownership"
+        crds_show_drift "$file" "$wd"
     fi
     crds_strip_argo_tracking "$wd/live.json" || return 1
     crds_wait_terminating "$wd/live.json" || return 1
+    # apply creates what is missing and moves field ownership onto our manager; replace then makes each object EXACTLY
+    # the bundle. Apply alone cannot remove metadata another installer left behind (SSA only manages fields it sets),
+    # so a migrated cluster would keep stale chart labels forever; replace converges it on a freshly bootstrapped one.
+    # Safe here only because no bundle CRD may declare a conversion webhook (hack/verify.sh enforces it), so nothing
+    # injects fields into these objects that a replace would wipe. Replace cannot create, which is why apply runs first.
     echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
     if ! kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3; then
         gum style --foreground 196 "❌ CRD apply failed"; return 1
     fi
+    echo "kubectl replace -f $file"
+    if ! kubectl replace -f "$file" > "$wd/replace.log" 2>&1; then
+        tail -5 "$wd/replace.log" >&2
+        gum style --foreground 196 "❌ CRD replace failed — the apply landed, so the cluster has the bundle's content; re-run to converge the metadata"; return 1
+    fi
+    tail -3 "$wd/replace.log"
     # shellcheck disable=SC2046   # crds_names output is intentionally word-split into one crd per argument
     if ! kubectl wait --for=condition=Established crd $(crds_names "$file" | xargs) --timeout=120s > /dev/null; then
         gum style --foreground 196 "❌ some CRDs did not become Established"; return 1
     fi
-    crds_strip_last_applied "$file" "$wd" || return 1
     local names_json n
     names_json=$(crds_names "$file" | jq -R . | jq -sc .) || return 1
     kubectl get crd --show-managed-fields -o json \
