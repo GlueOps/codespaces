@@ -4,7 +4,6 @@
 set -e -u -o pipefail
 # shellcheck source=stubs.sh
 source "$(dirname "$0")/stubs.sh"
-load_functions ask_dir crds_bundle_enabled handle_crds
 mkdir -p "$T/work/VERSIONS" "$T/local"; printf 'versions:\n- name: platform_crds_version\n  version: "v0.0.1"\n' > "$T/work/VERSIONS/glueops.yaml"
 run() { local n=$1 e=$2 i=$3; shift 3; run_case "$n" "$e" "$i" handle_crds "$@"; }
 

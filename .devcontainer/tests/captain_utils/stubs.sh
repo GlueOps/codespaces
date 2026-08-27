@@ -52,14 +52,9 @@ export PATH="$T/bin:$PATH" CAPTAIN_UTILS_CRDS="$T/bin/crds-cmd" GUM_PICKS_FILE="
 : > "$GUM_PICKS_FILE"; : > "$GUM_CONFIRM_FILE"
 
 # ---- code under test ----
-# load_functions NAME... — extracts the named functions (plus the two file-level defaults they read) from captain_utils.sh
-# into $T/funcs.sh, which run_case sources. (Replaced by sourcing the real file once the library split lands.)
-load_functions() {
-    local f
-    { grep '^CAPTAIN_UTILS_CRDS=\|^PLATFORM_CHART_DIR_PREFILL=' "$CU"
-      for f in "$@"; do awk "/^$f\\(\\)/,/^}/" "$CU"; done; } > "$T/funcs.sh"
-}
-UNDER_TEST="source '$T/funcs.sh'"
+# run_case sources the real captain_utils.sh (which sources libexec/captain_utils/custom.sh); the file returns
+# before its main loop when sourced.
+UNDER_TEST="source '$CU'"
 
 # run_case NAME ENV STDIN FN PICKS... — runs FN in $T/work with the given stdin (a trailing newline is added; use
 # run_case_raw for byte-exact stdin) and gum choose picks; captures stdout+stderr and "RC=<status>" into $T/out.

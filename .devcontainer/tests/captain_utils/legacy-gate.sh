@@ -5,7 +5,6 @@
 set -e -u -o pipefail
 # shellcheck source=stubs.sh
 source "$(dirname "$0")/stubs.sh"
-load_functions ask_dir crds_bundle_enabled handle_crds handle_argocd
 # shellcheck disable=SC2034   # read by run_case (stubs.sh)
 COMPONENT=argocd
 run() { local n=$1 e=$2 fn=$3; shift 3; run_case "$n" "$e" "" "$fn" "$@"; }

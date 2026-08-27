@@ -6,7 +6,6 @@
 set -e -u -o pipefail
 # shellcheck source=stubs.sh
 source "$(dirname "$0")/stubs.sh"
-load_functions ask_dir dir_git_info handle_platform_upgrades handle_platform_custom handle_platform_custom_dir
 
 # chart fixtures: a clean git checkout on a branch, a dirty one, a plain non-git dir, a dir without Chart.yaml, another chart name
 mk_chart() { mkdir -p "$1/templates"; printf 'apiVersion: v2\nname: %s\nversion: %s\n' "$2" "$3" > "$1/Chart.yaml"; echo 'x: 1' > "$1/templates/a.yaml"; }
@@ -43,8 +42,10 @@ refute "HELM"; refute "chart glueops-platform"; expect "RC=0"
 run "D8 relative path resolved, trailing slash dropped, ~ expanded" dev "clean/" custom
 cp -r "$T/clean" "$T/work/clean"; run "D8 relative path resolved, trailing slash dropped" dev "clean/" custom
 expect "from $T/work/clean ("; expect "description custom: $T/work/clean"; expect "RC=0"
+ln -s "$T/plain" "$HOME/.platform-custom-test-$$"
 # shellcheck disable=SC2088   # the literal ~/ is the input under test
-ln -s "$T/plain" "$HOME/.platform-custom-test-$$"; run "D8b ~ expanded (symlink resolved)" dev "~/.platform-custom-test-$$" custom; rm -f "$HOME/.platform-custom-test-$$"
+run "D8b ~ expanded (symlink resolved)" dev "~/.platform-custom-test-$$" custom
+rm -f "$HOME/.platform-custom-test-$$"
 expect "from $T/plain"; expect "RC=0"
 confirms 1; run "D9 decline the diff prompt" dev "$T/clean" custom
 expect "chart glueops-platform"; refute "HELM"; expect "RC=0"
