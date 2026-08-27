@@ -14,6 +14,8 @@
 # env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
 #         KUBECTL_EXTERNAL_DIFF is ignored; without a TTY the diff is printed in full and CRDS_AUTO_CONFIRM=yes is required
 #         CRDS_CHART (chart ref override), CRDS_AUTO_CONFIRM=yes (skip the confirm prompt), TMPDIR (work dir parent)
+# CRD profiles: which CRDs a cluster installs is selected from ./platform.yaml (production requires it; dev without one
+# installs every profile). The chart makes every profile key mandatory, so a renamed key fails instead of dropping CRDs.
 #
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
@@ -44,13 +46,29 @@ crds_target_version() {   # prints a version, "custom" or "Back"; non-zero when 
     fi
 }
 
-crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered bundle (written atomically)
-    local v=${1#v} out="$2/platform-crds-${1}.yaml"
-    local -a version_arg=(--version "$v")
-    [ -d "$CRDS_CHART" ] && version_arg=()   # a local chart directory (apply-dir) has no version to select
-    if ! helm show crds "$CRDS_CHART" "${version_arg[@]}" > "$out.tmp" 2>"$2/fetch.err"; then
-        cat "$2/fetch.err" >&2; return 1
+crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered bundle (written atomically).
+    # The bundle ships CRDs for conditionally-deployed components in profile subcharts, so what a cluster installs is
+    # selected by its own platform.yaml: `helm template --include-crds -f platform.yaml`. `helm show crds` still
+    # returns the values-independent UNION — fetched too, so the summary can say "83 of 85". A profile key that was
+    # renamed or is missing is a hard error from the chart's values.schema.json, never a silent fallback.
+    local v=${1#v} out="$2/platform-crds-${1}.yaml" src="$CRDS_CHART"
+    if [ ! -d "$CRDS_CHART" ]; then
+        if ! helm pull "$CRDS_CHART" --version "$v" -d "$2" >"$2/fetch.err" 2>&1; then cat "$2/fetch.err" >&2; return 1; fi
+        src=$(ls "$2"/*.tgz 2>/dev/null | head -1)
+        [ -n "$src" ] || { gum style --foreground 196 "❌ platform-crds $1: helm pull produced no package" >&2; return 1; }
     fi
+    if [ -f platform.yaml ]; then
+        if ! helm template x "$src" --include-crds -f platform.yaml > "$out.tmp" 2>"$2/fetch.err"; then
+            cat "$2/fetch.err" >&2
+            gum style --foreground 196 "❌ platform-crds $1: could not select CRD profiles from platform.yaml (see the error above; a renamed profile key fails here by design)" >&2; return 1
+        fi
+    elif [ "$environment" = "production" ]; then
+        gum style --foreground 196 "❌ no platform.yaml in $PWD — the bundle reads it to pick the CRD profiles for this cluster; run captain_utils from the captain repo root" >&2; return 1
+    else
+        gum style --foreground 214 "no platform.yaml (dev): installing every profile" >&2
+        if ! helm show crds "$src" > "$out.tmp" 2>"$2/fetch.err"; then cat "$2/fetch.err" >&2; return 1; fi
+    fi
+    helm show crds "$src" 2>/dev/null | grep -c '^kind: CustomResourceDefinition' > "$2/union.count" || echo 0 > "$2/union.count"
     local kinds names other
     kinds=$(grep -c '^kind: CustomResourceDefinition' "$out.tmp") || true
     if [ "$kinds" -eq 0 ]; then
@@ -62,14 +80,17 @@ crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered 
         cat "$2/yq.err" >&2 2>/dev/null || true
         gum style --foreground 196 "❌ platform-crds $1: bundle does not parse as $kinds separate CRD documents (every crds/*.yaml must start with --- — run hack/render.sh)" >&2; return 1
     fi
-    other=$(yq -N 'select(.kind != "CustomResourceDefinition") | (.kind // "?") + "/" + (.metadata.name // "?")' "$out.tmp" 2>/dev/null | grep . || true)
+    # `--include-crds` emits an empty document before each CRD; only real non-CRD objects are a problem
+    other=$(yq -N 'select(type == "!!map" and .kind != "CustomResourceDefinition") | (.kind // "?") + "/" + (.metadata.name // "?")' "$out.tmp" 2>/dev/null | grep . || true)
     if [ -n "$other" ]; then
         gum style --foreground 196 "❌ platform-crds $1: bundle contains non-CRD objects, refusing to apply: $(printf '%s\n' "$other" | paste -sd' ' -)" >&2; return 1
     fi
     mv "$out.tmp" "$out" && echo "$out"
 }
 
-crds_names() { yq -N 'select(.kind=="CustomResourceDefinition") | .metadata.name' "$1"; }
+# type == "!!map" (not `. != null`): `helm template --include-crds` emits an empty document before each CRD, and a
+# null document survives a `. != null` guard once an array is constructed over it — the type check is the reliable filter.
+crds_names() { yq -N 'select(type == "!!map" and .kind=="CustomResourceDefinition") | .metadata.name' "$1"; }
 
 # Live CRD JSON for the bundle's CRDs only (one API call), written to a file (too large for argv/variables).
 crds_live_json() {   # $1 = bundle file, $2 = output file
@@ -82,9 +103,11 @@ crds_live_json() {   # $1 = bundle file, $2 = output file
 # ("must remain in spec.versions until a storage migration"). Detect it before applying and name the fix.
 crds_storedversions_check() {   # $1 = bundle file, $2 = live json file
     local bad
+    # `helm template --include-crds` emits an empty document before each CRD. yq's select cannot drop them here (an
+    # array construction over a null document resurrects it), so the jq stage filters on a missing .name instead.
     bad=$(yq -N -o=json -I0 'select(.kind=="CustomResourceDefinition") | {"name": .metadata.name, "versions": [.spec.versions[].name], "served": [.spec.versions[] | select(.served==true) | .name]}' "$1" \
         | jq -rs --slurpfile livef "$2" '$livef[0] as $live |
-            map({(.name): .}) | add as $b
+            map(select(.name != null)) | map({(.name): .}) | add as $b
             | $live[] | .metadata.name as $n | select($b[$n] != null)
             | (.status.storedVersions // [])[] as $sv
             | if ($b[$n].versions | index($sv)) == null then "ERROR \($n) stores \($sv), which platform-crds no longer defines"
@@ -136,6 +159,11 @@ crds_strip_last_applied() {   # $1 = bundle file, $2 = work dir — leftovers af
     fi
 }
 
+crds_scope() {   # $1 = work dir, $2 = CRDs selected for this cluster; "83 of 85 — some profiles off" when they differ
+    local union; union=$(cat "$1/union.count" 2>/dev/null || echo 0)
+    if [ "$union" -gt "$2" ] 2>/dev/null; then echo "$2 of $union CRDs — profiles not enabled on this cluster are excluded"
+    else echo "$2 CRDs"; fi
+}
 crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does not exist yet diffs from an empty file (single "@@ -0,0" hunk)
     local new chg
     new=$(grep -c '^@@ -0,0 ' <<<"$1" || true)
@@ -165,7 +193,8 @@ crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); r
         gum style --foreground 196 "❌ '$dir' is not a rendered platform-crds checkout (needs Chart.yaml and crds/*.yaml — run hack/render.sh)"; return 1
     fi
     local f
-    for f in "$dir"/crds/*.yaml; do   # helm show crds concatenates these without separators (see crds_fetch)
+    for f in "$dir"/crds/*.yaml "$dir"/charts/*/crds/*.yaml; do   # helm concatenates these without separators (see crds_fetch)
+        [ -e "$f" ] || continue
         if [ "$(head -1 "$f")" != "---" ]; then
             gum style --foreground 196 "❌ $f must start with --- (helm show crds concatenates crds/*.yaml without separators — run hack/render.sh)"; return 1
         fi
@@ -173,7 +202,7 @@ crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); r
     name=$(yq '.name' "$dir/Chart.yaml")
     if [ "$name" != "platform-crds" ]; then gum style --foreground 196 "❌ '$dir/Chart.yaml' is chart '$name', not platform-crds"; return 1; fi
     git_info=$(crds_dir_git_info "$dir")
-    gum style --foreground 212 --bold "platform-crds $(yq '.version' "$dir/Chart.yaml") from $dir${git_info:+ ($git_info)} — $(ls "$dir"/crds/*.yaml | wc -l) CRD files"
+    gum style --foreground 212 --bold "platform-crds $(yq '.version' "$dir/Chart.yaml") from $dir${git_info:+ ($git_info)} — $(ls "$dir"/crds/*.yaml "$dir"/charts/*/crds/*.yaml 2>/dev/null | wc -l) CRD files"
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
     CRDS_CHART="$dir" crds_apply_in "local" "$wd" || rc=$?
     rm -rf "$wd"
@@ -198,7 +227,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if difftxt=$(kubectl diff --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" 2>&1); then rc=0; else rc=$?; fi
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
     if [ "$rc" -eq 1 ]; then
-        gum style --bold --foreground 212 "CRD changes for platform-crds $v ($total CRDs in bundle):"; crds_summary "$difftxt"
+        gum style --bold --foreground 212 "CRD changes for platform-crds $v ($(crds_scope "$wd" "$total")):"; crds_summary "$difftxt"
         if [ -t 1 ]; then echo "$difftxt" | gum pager; else echo "$difftxt"; fi
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
             if ! gum confirm "Apply platform-crds $v?"; then
@@ -207,7 +236,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
             fi
         fi
     else
-        gum style --foreground 212 "No CRD content changes for platform-crds $v ($total CRDs) — applying to record ownership"
+        gum style --foreground 212 "No CRD content changes for platform-crds $v ($(crds_scope "$wd" "$total")) — applying to record ownership"
     fi
     crds_strip_argo_tracking "$wd/live.json" || return 1
     crds_wait_terminating "$wd/live.json" || return 1
