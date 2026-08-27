@@ -31,6 +31,7 @@ ask_dir() {
     # shellcheck disable=SC2088   # literal pattern match on a typed ~, expanded by hand below
     case "$d" in '~') d=$HOME ;; '~/'*) d="$HOME${d#\~}" ;; esac
     [ "$d" = / ] || d="${d%/}"
+    [ "$d" != - ] || d=./-   # never let cd read a bare '-' as "previous directory"
     [ -n "$d" ] || return 0
     ( CDPATH='' cd -- "$d" >/dev/null 2>&1 && pwd -P ) || printf '%s\n' "$d"
 }

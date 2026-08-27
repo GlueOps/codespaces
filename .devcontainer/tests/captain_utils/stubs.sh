@@ -4,6 +4,7 @@
 # function under `set -e -u -o pipefail` exactly as captain_utils does, and expect/refute assertions with a FAILS counter.
 # No cluster, no network. Sourced by each harness; harnesses run with `set -e -u -o pipefail`.
 REPO=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1   # fixtures must not inherit gpgsign/hooks
 CU=$REPO/.devcontainer/tools/captain_utils.sh
 export CAPTAIN_UTILS_LIBEXEC=$REPO/.devcontainer/libexec/captain_utils
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

@@ -12,10 +12,12 @@
 #         /usr/local/libexec/captain_utils/crds apply-dir <dir>  same flow from a local GlueOps/platform-crds checkout
 #                                                                (Chart.yaml + crds/ as rendered by hack/render.sh)
 # env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
+#         KUBECTL_EXTERNAL_DIFF is ignored; without a TTY the diff is printed in full and CRDS_AUTO_CONFIRM=yes is required
 #         CRDS_CHART (chart ref override), CRDS_AUTO_CONFIRM=yes (skip the confirm prompt), TMPDIR (work dir parent)
 #
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
+unset KUBECTL_EXTERNAL_DIFF   # the exit code and hunk headers parsed below assume kubectl's built-in diff
 environment="${environment:-production}"
 
 CRDS_CHART="${CRDS_CHART:-oci://ghcr.repo.gpkg.io/glueops/platform-crds}"   # mirror of ghcr.io/glueops/platform-crds
@@ -23,20 +25,22 @@ CRDS_FIELD_MANAGER="glueops-platform-crds"
 
 crds_valid_version() {   # $1 = version; rejects empty/garbage (an empty --version makes helm pull LATEST)
     if [[ ! "${1:-}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        gum style --foreground 196 "❌ no/invalid platform_crds_version ('${1:-}') — run 'terraform apply' on the captain repo first" >&2
+        gum style --foreground 196 "❌ platform_crds_version must be a release tag vX.Y.Z (got '${1:-}') — check VERSIONS/glueops.yaml" >&2
         return 1
     fi
 }
 
-crds_target_version() {   # prints a version or "Back"; non-zero when it cannot determine one
-    local tags
+crds_target_version() {   # prints a version, "custom" or "Back"; non-zero when it cannot determine one
+    local tags v
     if [ "$environment" = "production" ]; then
-        yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml
+        v=$(yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml) || return 1
+        crds_valid_version "$v" || return 1   # a duplicated pin prints two lines and is rejected by the anchored regex
+        echo "$v"
     else
         tags=$(gh release list --repo GlueOps/platform-crds --limit 10 --json tagName --jq '.[].tagName' | paste -sd' ' -) || return 1
         # zero releases is fine: the chooser then offers just custom/Back (a local checkout is what a dev needs then)
         # shellcheck disable=SC2086   # one argument per tag
-        gum choose $tags "custom" "Back"
+        gum choose $tags "custom" "Back" || echo Back   # Esc/Ctrl-C in the chooser is a back-out, not an error
     fi
 }
 
@@ -70,7 +74,8 @@ crds_names() { yq -N 'select(.kind=="CustomResourceDefinition") | .metadata.name
 # Live CRD JSON for the bundle's CRDs only (one API call), written to a file (too large for argv/variables).
 crds_live_json() {   # $1 = bundle file, $2 = output file
     local names_json; names_json=$(crds_names "$1" | jq -R . | jq -sc .) || return 1
-    kubectl get crd -o json | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$2"
+    kubectl get crd -o json | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$2" \
+        || { gum style --foreground 196 "❌ cannot list CRDs on the current kube context (kubectl get crd)" >&2; return 1; }
 }
 
 # A stored API version that the new bundle no longer declares makes the API server reject the update
@@ -144,6 +149,7 @@ crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does no
 crds_apply() {   # $1 = version
     local wd rc=0
     crds_valid_version "$1" || return 1
+    if [ -d "$CRDS_CHART" ]; then gum style --foreground 196 "❌ CRDS_CHART points at a directory ('$CRDS_CHART') — use apply-dir" >&2; return 1; fi
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
     crds_apply_in "$1" "$wd" || rc=$?
     rm -rf "$wd"
@@ -185,6 +191,7 @@ crds_dir_git_info() {   # $1 = dir; "branch@sha[, dirty]" when inside a git chec
 crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     local v=$1 wd=$2 file difftxt rc=0 total unowned
     file=$(crds_fetch "$v" "$wd") || return 1
+    [ -d "$CRDS_CHART" ] || gum style --foreground 245 "bundle source: $CRDS_CHART --version ${v#v}"   # any override shows in the transcript
     total=$(crds_names "$file" | wc -l)
     crds_live_json "$file" "$wd/live.json" || return 1
     crds_storedversions_check "$file" "$wd/live.json" || return 1
@@ -192,9 +199,12 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
     if [ "$rc" -eq 1 ]; then
         gum style --bold --foreground 212 "CRD changes for platform-crds $v ($total CRDs in bundle):"; crds_summary "$difftxt"
-        echo "$difftxt" | gum pager
+        if [ -t 1 ]; then echo "$difftxt" | gum pager; else echo "$difftxt"; fi
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
-            if ! gum confirm "Apply platform-crds $v?"; then gum style --foreground 212 "Skipped platform-crds $v"; return 0; fi
+            if ! gum confirm "Apply platform-crds $v?"; then
+                if ! [ -t 0 ]; then gum style --foreground 196 "❌ no TTY to confirm on — set CRDS_AUTO_CONFIRM=yes for scripted runs" >&2; return 1; fi
+                gum style --foreground 212 "Skipped platform-crds $v"; return 0
+            fi
         fi
     else
         gum style --foreground 212 "No CRD content changes for platform-crds $v ($total CRDs) — applying to record ownership"

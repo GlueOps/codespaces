@@ -19,7 +19,8 @@ expect "CRDS CMD target-version"; expect "CRDS CMD apply v0.0.1"; expect "RC=0"
 
 mk "${OLD[@]}"; run "B1 prod, no pin: legacy chooser + kubectl apply -k ref=v3.2.12 before helm" production handle_argocd 9.3.7 v3.2.12
 expect "Select ArgoCD App Version (legacy"; expect 'KUBECTL apply -k https://github.com/argoproj/argo-cd/manifests/crds?ref=v3.2.12'; expect "HELM repo update"; expect "Pre-commands complete"; expect "HELM upgrade .*--skip-crds"; expect "RC=0"
-grep -n 'KUBECTL apply\|HELM upgrade' "$T/out" | awk -F: 'NR==1{a=$1} NR==2{b=$1} END{ if (a<b) print "  ok: CRDs applied before helm upgrade"; else {print "  FAIL: order"; exit 1} }'
+order_ok() { local a b; a=$(grep -n 'KUBECTL apply' "$T/out" | head -1 | cut -d: -f1); b=$(grep -n 'HELM upgrade' "$T/out" | head -1 | cut -d: -f1); [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; }
+CASES=$((CASES+1)); if order_ok; then echo "  ok: CRDs applied before helm upgrade"; else echo "  FAIL: CRDs must be applied before helm upgrade"; FAILS=$((FAILS+1)); fi
 run "B2 prod, no pin: crds item explains and returns 0 without calling the command" production handle_crds
 expect "not on the platform-crds bundle yet"; refute "CRDS CMD"; expect "RC=0"
 run "B3 prod, no pin, Skip: no CRD apply, helm still runs" production handle_argocd 9.3.7 Skip
@@ -38,5 +39,9 @@ expect "CRDS CMD target-version"; expect "CRDS CMD apply v0.0.1"; expect "RC=0"
 
 mk argocd_helm_chart_version=9.3.7 argocd_app_version=v3.2.12 platform_crds_version=; run "D1 prod, pin present but empty: treated as not on the bundle (legacy)" production handle_argocd 9.3.7 Skip
 expect "Select ArgoCD App Version (legacy"; expect "RC=0"
+mk argocd_helm_chart_version=9.3.7 argocd_app_version=v3.2.12 platform_crds_version=platform_crds_version_placeholder; run "D2 prod, malformed pin (unrendered placeholder): legacy path, crds item explains" production handle_argocd 9.3.7 Skip
+expect "Select ArgoCD App Version (legacy"; expect "RC=0"
+run "D2b same repo: crds item does not run the command" production handle_crds
+expect "no valid platform_crds_version pin"; refute "CRDS CMD"; expect "RC=0"
 
 finish

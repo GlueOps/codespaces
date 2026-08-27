@@ -7,7 +7,8 @@ set -u
 set -o pipefail
 
 # Helpers for the "custom" (local directory) flows live in a sourced library next to the crds command
-# (installed by the Dockerfile under /usr/local/libexec/captain_utils: off the PATH, not executable).
+# (installed by the Dockerfile under /usr/local/libexec/captain_utils, off the PATH; custom.sh is sourced, never
+# executed — only the crds command is +x).
 CAPTAIN_UTILS_LIBEXEC="${CAPTAIN_UTILS_LIBEXEC:-/usr/local/libexec/captain_utils}"
 [ -r "$CAPTAIN_UTILS_LIBEXEC/custom.sh" ] || { echo "captain_utils: $CAPTAIN_UTILS_LIBEXEC/custom.sh is missing — rebuild the codespace image" >&2; exit 1; }
 # shellcheck source=../libexec/captain_utils/custom.sh
@@ -59,7 +60,7 @@ crds_bundle_enabled() {
     [ -f VERSIONS/glueops.yaml ] || return 1
     local v
     v=$(yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml 2>/dev/null) || return 1
-    [ -n "$v" ] && [ "$v" != "null" ]
+    [[ "$v" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]   # a release-tag-shaped pin; anything else keeps the legacy path
 }
 
 # menu item "crds" — run BEFORE argocd and AGAIN AFTER argocd (second run is a no-op unless the argocd release removed a CRD).
@@ -67,14 +68,15 @@ crds_bundle_enabled() {
 handle_crds() {
     local v choice dir
     if [ "$environment" = "production" ] && ! crds_bundle_enabled; then
-        gum style --foreground 214 "This cluster is not on the platform-crds bundle yet: VERSIONS/glueops.yaml has no platform_crds_version pin."
+        gum style --foreground 214 "This cluster is not on the platform-crds bundle yet: VERSIONS/glueops.yaml has no valid platform_crds_version pin."
         gum style --foreground 214 "ArgoCD's CRDs are still applied by the argocd step. Bump the terraform module and 'terraform apply' the captain repo to enable the bundle."
         return 0
     fi
     if [ ! -x "$CAPTAIN_UTILS_CRDS" ]; then
         gum style --foreground 196 "❌ $CAPTAIN_UTILS_CRDS is missing or not executable — rebuild the codespace image"; return 0
     fi
-    if ! v=$(environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
+    # env -u: an operator's leftover CRDS_CHART / CRDS_AUTO_CONFIRM must not redirect or auto-confirm the pinned run
+    if ! v=$(env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
     if [ "$v" = "Back" ]; then return 0; fi
     if [ "$environment" = "production" ]; then
         choice=$(gum choose "$v" "custom" "Back") || return 0   # dev: the release chooser inside target-version already offers custom
@@ -88,13 +90,13 @@ handle_crds() {
             if [ "$environment" = "production" ]; then
                 gum style --foreground 196 --bold "⚠️  custom applies UNRELEASED CRDs to this cluster. Nothing records it afterwards (same field manager as the pinned bundle) — the next pinned run's diff shows what it changed."
             fi
-            gum style "Local platform-crds directory — a checkout of GlueOps/platform-crds with crds/ rendered (Tab completes, empty = back):"
+            gum style "Local platform-crds directory — a checkout of GlueOps/platform-crds with crds/ rendered (Tab completes, empty = back, Ctrl-C exits captain_utils):"
             if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
             if [ -z "$dir" ]; then return 0; fi
-            if ! environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
+            if ! env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
             ;;
         *)
-            if ! environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
+            if ! env -u CRDS_CHART -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
             ;;
     esac
     return 0
@@ -172,7 +174,7 @@ handle_platform_custom() {
     if [ "$environment" = "production" ]; then
         gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster. The VERSIONS/glueops.yaml pin will no longer describe what is running, and show_diff_table will usually NOT show it (feature branches keep main's Chart.yaml version) — 'helm history $component -n glueops-core' is the only record. Re-run glueops-platform with the pinned version to get back."
     fi
-    gum style "Local chart directory — a checkout of GlueOps/platform-helm-chart-platform (Tab completes, empty = back):"
+    gum style "Local chart directory — a checkout of GlueOps/platform-helm-chart-platform (Tab completes, empty = back, Ctrl-C exits captain_utils):"
     if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
     if [ -z "$dir" ]; then return 0; fi
     handle_platform_custom_dir "$dir" "$overrides_file" || true

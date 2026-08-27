@@ -39,13 +39,11 @@ run "D6 other chart name: note, still confirmable" dev "$T/other" custom
 expect "note: Chart.yaml name is 'something-else' but it will be installed as release 'glueops-platform'"; expect "HELM upgrade"; expect "RC=0"
 run "D7 empty path = back" dev "" custom
 refute "HELM"; refute "chart glueops-platform"; expect "RC=0"
-run "D8 relative path resolved, trailing slash dropped, ~ expanded" dev "clean/" custom
 cp -r "$T/clean" "$T/work/clean"; run "D8 relative path resolved, trailing slash dropped" dev "clean/" custom
 expect "from $T/work/clean ("; expect "description custom: $T/work/clean"; expect "RC=0"
-ln -s "$T/plain" "$HOME/.platform-custom-test-$$"
+mkdir -p "$T/home"; ln -s "$T/plain" "$T/home/x"
 # shellcheck disable=SC2088   # the literal ~/ is the input under test
-run "D8b ~ expanded (symlink resolved)" dev "~/.platform-custom-test-$$" custom
-rm -f "$HOME/.platform-custom-test-$$"
+HOME="$T/home" run "D8b ~ expanded (symlink resolved)" dev "~/x" custom
 expect "from $T/plain"; expect "RC=0"
 confirms 1; run "D9 decline the diff prompt" dev "$T/clean" custom
 expect "chart glueops-platform"; refute "HELM"; expect "RC=0"
@@ -57,7 +55,7 @@ expect "helm diff failed"; refute "HELM upgrade"; expect "RC=0"
 HELM_UPGRADE_RC=1 run "D12 helm upgrade fails" dev "$T/clean" custom
 expect "helm upgrade failed"; expect "RC=0"
 touch "$T/work/overrides.yaml"; run "D13 overrides.yaml passed through" dev "$T/clean" custom
-expect "Overrides.yaml detected"; expect "$T/clean -f platform.yaml -f overrides.yaml -n glueops-core --create-namespace --description"; expect "RC=0"
+expect "GUM: Overrides.yaml detected"; refute "No Overrides.yaml"; expect "$T/clean -f platform.yaml -f overrides.yaml -n glueops-core --create-namespace --description"; expect "RC=0"
 rm -f "$T/work/overrides.yaml"
 GIT_DIR="$T/work/.git" run "D14 exported GIT_DIR ignored for the info line" dev "$T/clean" custom
 expect "(feat/my-thing@$CLEAN_SHA)"; expect "RC=0"
@@ -69,7 +67,7 @@ run "A2 a FILE instead of a directory" dev "$T/clean/Chart.yaml" custom
 expect "is not a directory"; refute "HELM"; expect "RC=0"
 mkdir -p "$T/locked"; cp "$T/plain/Chart.yaml" "$T/locked/"; chmod 000 "$T/locked"
 run "A3 mode-000 directory (uid $(id -u))" dev "$T/locked" custom
-expect "RC=0"; refute "HELM"; grep -E "is not a directory|has no Chart.yaml|cannot enter" "$T/out" >/dev/null && echo "  (refused)" || true
+if [ "$(id -u)" = 0 ]; then expect "RC=0"; echo "  (uid 0 can enter a mode-000 dir; refusal not asserted)"; else expect "RC=0"; refute "HELM"; grep -E "is not a directory|has no Chart.yaml|cannot enter" "$T/out" >/dev/null && echo "  (refused)" || true; fi
 chmod 755 "$T/locked"
 mk_chart "$T/space dir" glueops-platform 0.79.0
 run "A4 path with a space (typed plainly, via pipe)" dev "$T/space dir" custom
@@ -84,8 +82,8 @@ expect "RC=0"; refute "HELM upgrade"; grep -n "chart .* from\|note:\|Error\|erro
 mkdir -p "$T/noname"; printf 'apiVersion: v2\nversion: 1.2.3\n' > "$T/noname/Chart.yaml"
 run "A7 Chart.yaml without a name" dev "$T/noname" custom
 expect "RC=0"; grep -n "chart .* from\|note:" "$T/out" | head -3 || true
-run "A8 the path '-' (cd - echoes OLDPWD into the captured path)" dev "-" custom
-expect "RC=0"; grep -n "is not a directory\|chart .* from" "$T/out" | head -3 || true
+run "A8 the path '-' is a name, not cd's previous directory" dev "-" custom
+expect "'./-' is not a directory"; refute "has no Chart.yaml"; refute "HELM"; expect "RC=0"
 cp -r "$T/clean" "$T/cdp"; run "A9 CDPATH exported by the operator, relative name that only CDPATH resolves" dev "cdp" custom
 expect "RC=0"; grep -n "is not a directory\|chart .* from" "$T/out" | head -3 || true
 CDPATH="$T" run "A9b same with CDPATH=\$T" dev "cdp" custom

@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - '.devcontainer/tools/captain_utils.sh'
+      - '.devcontainer/Dockerfile'
       - '.devcontainer/libexec/**'
       - '.devcontainer/tests/**'
       - 'hack/test.sh'
