@@ -39,11 +39,11 @@ ask_dir() {
 # otherwise. GIT_DIR/GIT_WORK_TREE are dropped so an operator's exported values cannot point this at the captain repo.
 dir_git_info() {
     local dir="$1" branch sha dirty=""
-    g() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir" "$@"; }
-    g rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-    sha=$(g rev-parse --short HEAD 2>/dev/null) || return 0
-    branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
-    [ -z "$(g status --porcelain -- . 2>/dev/null)" ] || dirty=", dirty"
+    local -a g=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir")   # an array, not a nested function (rule 4)
+    "${g[@]}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    sha=$("${g[@]}" rev-parse --short HEAD 2>/dev/null) || return 0
+    branch=$("${g[@]}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    [ -z "$("${g[@]}" status --porcelain -- . 2>/dev/null)" ] || dirty=", dirty"
     printf '%s@%s%s' "$branch" "$sha" "$dirty"
 }
 

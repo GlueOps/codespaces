@@ -21,6 +21,8 @@ check lib_sources_silently
 check lib_defines_exactly
 check lib_no_toplevel_commands
 check lib_no_shebang
+lib_leaves_nothing_behind() { bash -c 'source "$1"; before=$(declare -F | wc -l); dir_git_info "$2" >/dev/null; [ "$(declare -F | wc -l)" = "$before" ] && ! declare -F g >/dev/null' _ "$LIB" "$REPO"; }
+check lib_leaves_nothing_behind
 
 echo "##### menu + library: no duplicate function names #####"
 no_duplicate_names() { [ -z "$(grep -ohE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$CU" "$LIB" | sort | uniq -d)" ]; }
