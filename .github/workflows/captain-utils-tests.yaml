@@ -1,0 +1,24 @@
+name: captain_utils tests
+on:
+  pull_request:
+    paths:
+      - '.devcontainer/tools/captain_utils.sh'
+      - '.devcontainer/libexec/**'
+      - '.devcontainer/tests/**'
+      - 'hack/test.sh'
+      - '.github/workflows/captain-utils-tests.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: hack/test.sh
+        run: ./hack/test.sh
