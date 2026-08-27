@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.156.0](https://github.com/GlueOps/codespaces/compare/v0.155.1...v0.156.0) (2026-08-27)
+
+
+### Features
+
+* bake build metadata into the image as env vars #minor ([#533](https://github.com/GlueOps/codespaces/issues/533)) ([994ec3b](https://github.com/GlueOps/codespaces/commit/994ec3b478e7cb5918ae3d315be045a7cc5d4b2d))
+* **captain_utils:** add crds menu item for the platform-crds bundle ([#566](https://github.com/GlueOps/codespaces/issues/566)) ([9f484ff](https://github.com/GlueOps/codespaces/commit/9f484ff5ae9e1b0ed454248a5f9fa2904d390dae))
+* create rotate-aws-eks-iam-keys.sh ([#556](https://github.com/GlueOps/codespaces/issues/556)) ([3e4228c](https://github.com/GlueOps/codespaces/commit/3e4228ce1854066108ebaaa4f247f04a557ece23))
+* update cloudflare/cloudflared to 2026.7.1 #minor ([#555](https://github.com/GlueOps/codespaces/issues/555)) ([57dd421](https://github.com/GlueOps/codespaces/commit/57dd42107fd8e3d386ce757d4a4f779d7f1c0b59))
+* update rlespinasse/github-slug-action to v5.7.0 #minor ([#559](https://github.com/GlueOps/codespaces/issues/559)) ([6ff6e3c](https://github.com/GlueOps/codespaces/commit/6ff6e3c0b2bb3ce0f0e8dbc0ad8700579df3bf28))
+
+
+### Miscellaneous Chores
+
+* **patch:** update @anthropic-ai/claude-code to 2.1.220 #patch ([#553](https://github.com/GlueOps/codespaces/issues/553)) ([411c4bc](https://github.com/GlueOps/codespaces/commit/411c4bc1a577ee739c160f8c5ebecaa646fea044))
+* **patch:** update cloudflare/cloudflared to 2026.7.3 #patch ([#560](https://github.com/GlueOps/codespaces/issues/560)) ([2558a85](https://github.com/GlueOps/codespaces/commit/2558a8543b823c18f72023d4af861b3b452c219a))
+* **patch:** update opentofu/opentofu to v1.11.13 #patch ([#558](https://github.com/GlueOps/codespaces/issues/558)) ([7050a76](https://github.com/GlueOps/codespaces/commit/7050a76fc5c3d04a577304568889f9cac131500c))
+
 ## [0.155.1](https://github.com/GlueOps/codespaces/compare/v0.155.0...v0.155.1) (2026-08-02)
 
 
