@@ -187,6 +187,22 @@ crds_foreign_owners() {
         | "\($c.metadata.name) \(.manager)"' "$1" | LC_ALL=C sort -u
 }
 
+# Warn on every run, loudly: a stale record is not a failure, but it misreports ownership, and if it appears again on
+# a cluster that was already cleaned it means something started rendering these CRDs again — the exact regression the
+# bundle exists to prevent. Amber, not red: red in this tool means "nothing was applied", and everything was applied.
+crds_warn_foreign_owners() {   # $1 = live-owned json
+    local stale n
+    stale=$(crds_foreign_owners "$1") || return 0
+    [ -n "$stale" ] || return 0
+    n=$(printf '%s\n' "$stale" | wc -l)
+    gum style --bold --foreground 214 "⚠  $n stale Apply record(s): a previous installer still shows as an owner of these CRDs"
+    printf '%s\n' "$stale" | head -10 | sed 's/^/     /'
+    [ "$n" -gt 10 ] && echo "     ... and $((n - 10)) more"
+    gum style --foreground 214 "   ownership is misreported until you run:  captain_utils/crds release-owners"
+    gum style --foreground 214 "   if this cluster was already cleaned, something is rendering these CRDs again — investigate before retracting"
+    return 0
+}
+
 # Retract those records. Only a manager can release its own Apply claim, so this re-applies a minimal object AS that
 # manager — which also DELETES any field only that manager owns. Every CRD is therefore server-dry-run first and
 # skipped if the result would differ from live. Scoped to CRDs we own, so nothing outside the bundle is touched.
@@ -333,8 +349,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
-    local stale; stale=$(crds_foreign_owners "$wd/live-owned.json" | wc -l)
-    [ "$stale" -eq 0 ] || gum style --foreground 214 "note: $stale stale Apply record(s) from a previous installer remain on these CRDs (harmless, but they misreport ownership) — run 'captain_utils/crds release-owners' to retract them"
+    crds_warn_foreign_owners "$wd/live-owned.json"
 }
 
 usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir> | release-owners   (see the header of this file)"; }
