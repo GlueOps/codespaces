@@ -70,7 +70,7 @@ handle_crds() {
     if ! v=$(environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
     if [ "$v" = "Back" ]; then return 0; fi
     if [ "$environment" = "production" ]; then
-        choice=$(gum choose "$v" "custom" "Back")   # dev: the release chooser inside target-version already offers custom
+        choice=$(gum choose "$v" "custom" "Back") || return 0   # dev: the release chooser inside target-version already offers custom
     else
         choice="$v"
     fi
@@ -155,10 +155,13 @@ handle_platform_upgrades() {
 # input; returns 1 on EOF. When stdin is not a terminal, read -e degrades to a plain read (scriptable).
 ask_dir() {
     local d
-    read -e -r -i "$1" -p "path> " d || return 1
-    d="${d/#\~/$HOME}"; d="${d%/}"
+    # no -r: readline escapes spaces/backslashes on Tab-completion ("with\ space/") and a plain read unescapes them again
+    read -e -i "$1" -p "path> " d || return 1
+    # shellcheck disable=SC2088   # literal pattern match on a typed ~, expanded by hand below
+    case "$d" in '~') d=$HOME ;; '~/'*) d="$HOME${d#\~}" ;; esac
+    [ "$d" = / ] || d="${d%/}"
     [ -n "$d" ] || return 0
-    ( cd "$d" 2>/dev/null && pwd -P ) || printf '%s\n' "$d"
+    ( CDPATH='' cd -- "$d" >/dev/null 2>&1 && pwd -P ) || printf '%s\n' "$d"
 }
 
 # dir_git_info DIR — "branch@sha" plus ", dirty" when DIR is inside a git checkout with uncommitted changes; empty
@@ -169,7 +172,7 @@ dir_git_info() {
     g rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
     sha=$(g rev-parse --short HEAD 2>/dev/null) || return 0
     branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
-    [ -z "$(g status --porcelain 2>/dev/null)" ] || dirty=", dirty"
+    [ -z "$(g status --porcelain -- . 2>/dev/null)" ] || dirty=", dirty"
     printf '%s@%s%s' "$branch" "$sha" "$dirty"
 }
 
@@ -204,8 +207,12 @@ handle_platform_custom_dir() {
     if [ ! -f "$dir/Chart.yaml" ]; then
         gum style --foreground 196 "❌ '$dir' has no Chart.yaml — point at a checkout of GlueOps/platform-helm-chart-platform"; return 1
     fi
-    chart_name=$(yq '.name' "$dir/Chart.yaml")
-    chart_version=$(yq '.version' "$dir/Chart.yaml")
+    if ! chart_name=$(yq -e '.name' "$dir/Chart.yaml" 2>/dev/null) || [ -z "$chart_name" ] || [ "$chart_name" = null ]; then
+        gum style --foreground 196 "❌ cannot read .name from $dir/Chart.yaml"; return 1
+    fi
+    if ! chart_version=$(yq -e '.version' "$dir/Chart.yaml" 2>/dev/null) || [ -z "$chart_version" ] || [ "$chart_version" = null ]; then
+        gum style --foreground 196 "❌ cannot read .version from $dir/Chart.yaml"; return 1
+    fi
     git_info=$(dir_git_info "$dir")
     gum style --foreground 212 --bold "chart $chart_name $chart_version from $dir${git_info:+ ($git_info)}"
     if [ "$chart_name" != "$component" ]; then
