@@ -6,6 +6,14 @@ set -e
 set -u
 set -o pipefail
 
+# Helpers for the "custom" (local directory) flows live in a sourced library next to the crds command
+# (installed by the Dockerfile under /usr/local/libexec/captain_utils, off the PATH; custom.sh is sourced, never
+# executed — only the crds command is +x).
+CAPTAIN_UTILS_LIBEXEC="${CAPTAIN_UTILS_LIBEXEC:-/usr/local/libexec/captain_utils}"
+[ -r "$CAPTAIN_UTILS_LIBEXEC/custom.sh" ] || { echo "captain_utils: $CAPTAIN_UTILS_LIBEXEC/custom.sh is missing — rebuild the codespace image" >&2; exit 1; }
+# shellcheck source=../libexec/captain_utils/custom.sh
+source "$CAPTAIN_UTILS_LIBEXEC/custom.sh"
+
 run_prerequisite_commands(){
     helm repo update
 }
@@ -37,7 +45,64 @@ show_diff_table(){
         --cell.border-foreground "63"
 }
 
-# Function to handle version selection and helm upgrade
+# ---- layer-0 CRD bundle (GlueOps/platform-crds) ----
+# The CRD logic lives in its own internal command (.devcontainer/libexec/captain_utils/crds, installed by the
+# Dockerfile to /usr/local/libexec/captain_utils/crds — deliberately OFF the PATH so nobody runs it by accident).
+# It is run as a subprocess by absolute path, not sourced, so nothing in it can leak into this menu shell.
+CAPTAIN_UTILS_CRDS="${CAPTAIN_UTILS_CRDS:-$CAPTAIN_UTILS_LIBEXEC/crds}"
+
+# A cluster is on the platform-crds bundle once its captain repo pins platform_crds_version in VERSIONS/glueops.yaml
+# (written by the terraform module). Captain repos that predate the pin keep the legacy path: ArgoCD's CRDs are
+# applied from upstream by the argocd step, everything else by the ArgoCD Applications. Dev mode has no VERSIONS
+# file, so it is never "on the bundle" here and the argocd step offers Skip instead.
+crds_bundle_enabled() {
+    [ "$environment" = "production" ] || return 1
+    [ -f VERSIONS/glueops.yaml ] || return 1
+    local v
+    v=$(yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml 2>/dev/null) || return 1
+    [[ "$v" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]   # a release-tag-shaped pin; anything else keeps the legacy path
+}
+
+# menu item "crds" — run BEFORE argocd and AGAIN AFTER argocd (second run is a no-op unless the argocd release removed a CRD).
+# Never propagates a non-zero status into the `set -e` menu loop.
+handle_crds() {
+    local v choice dir
+    if [ "$environment" = "production" ] && ! crds_bundle_enabled; then
+        gum style --foreground 214 "This cluster is not on the platform-crds bundle yet: VERSIONS/glueops.yaml has no valid platform_crds_version pin."
+        gum style --foreground 214 "ArgoCD's CRDs are still applied by the argocd step. Bump the terraform module and 'terraform apply' the captain repo to enable the bundle."
+        return 0
+    fi
+    if [ ! -x "$CAPTAIN_UTILS_CRDS" ]; then
+        gum style --foreground 196 "❌ $CAPTAIN_UTILS_CRDS is missing or not executable — rebuild the codespace image"; return 0
+    fi
+    # env -u: an operator's leftover CRDS_AUTO_CONFIRM must not skip the confirm. CRDS_CHART stays overridable (e2e runs
+    # the menu against an unpublished bundle); the command prints the source it used and refuses a directory here.
+    if ! v=$(env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" target-version); then gum style --foreground 196 "❌ could not determine the platform-crds version"; return 0; fi
+    if [ "$v" = "Back" ]; then return 0; fi
+    if [ "$environment" = "production" ]; then
+        choice=$(gum choose "$v" "custom" "Back") || return 0   # dev: the release chooser inside target-version already offers custom
+    else
+        choice="$v"
+    fi
+    case "$choice" in
+        Back) return 0 ;;
+        custom)
+            # custom: apply the bundle from a local checkout of GlueOps/platform-crds (after hack/render.sh)
+            if [ "$environment" = "production" ]; then
+                gum style --foreground 196 --bold "⚠️  custom applies UNRELEASED CRDs to this cluster. Nothing records it afterwards (same field manager as the pinned bundle) — the next pinned run's diff shows what it changed."
+            fi
+            gum style "Local platform-crds directory — a checkout of GlueOps/platform-crds with crds/ rendered (Tab completes, empty = back, Ctrl-C exits captain_utils):"
+            if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
+            if [ -z "$dir" ]; then return 0; fi
+            if ! env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply-dir "$dir"; then gum style --foreground 196 "platform-crds from $dir NOT applied"; fi
+            ;;
+        *)
+            if ! env -u CRDS_AUTO_CONFIRM environment="$environment" "$CAPTAIN_UTILS_CRDS" apply "$v"; then gum style --foreground 196 "platform-crds $v NOT applied"; fi
+            ;;
+    esac
+    return 0
+}
+
 handle_platform_upgrades() {
     # Handle exit option
     if [ "$environment" = "production" ]; then
@@ -60,10 +125,15 @@ handle_platform_upgrades() {
             gum style --foreground 196 --bold "No Overrides.yaml detected"
             overrides_file="platform.yaml"
         fi
-        version=$(gum choose "${versions[@]}" "Back")
+        version=$(gum choose "${versions[@]}" "custom" "Back")
         
         # Check if user wants to go back
         if [ "$version" = "Back" ]; then
+            return
+        fi
+        # custom: install the chart from a local directory (feature testing)
+        if [ "$version" = "custom" ]; then
+            handle_platform_custom "$overrides_file"
             return
         fi
         echo "chosen version: $version for $chart_name"
@@ -89,6 +159,29 @@ handle_platform_upgrades() {
     done
 }
 
+# ---- glueops-platform "custom": install the platform chart from a local directory ----
+# For testing local changes: point at a checkout of GlueOps/platform-helm-chart-platform (the chart has no
+# dependencies, so helm diffs/upgrades it straight from the directory, .helmignore respected). Flow: path prompt ->
+# show path, chart name/version and branch@sha (+dirty) -> confirm -> the same diff -> confirm -> upgrade flow as the
+# pinned path (keep the helm lines in sync with handle_platform_upgrades). The release is stamped with
+# --description "custom: <dir> (<branch>@<sha>[, dirty])" so `helm history glueops-platform -n glueops-core` shows what
+# is really installed (per revision: the next pinned upgrade records "Upgrade complete" again). Never propagates a
+# non-zero status into the `set -e` menu loop.
+PLATFORM_CHART_DIR_PREFILL="${PLATFORM_CHART_DIR_PREFILL:-/workspaces/}"
+
+handle_platform_custom() {
+    local overrides_file="$1"
+    local dir
+    if [ "$environment" = "production" ]; then
+        gum style --foreground 196 --bold "⚠️  custom installs an UNRELEASED chart on this cluster. The VERSIONS/glueops.yaml pin will no longer describe what is running, and show_diff_table will usually NOT show it (feature branches keep main's Chart.yaml version) — 'helm history $component -n glueops-core' is the only record. Re-run glueops-platform with the pinned version to get back."
+    fi
+    gum style "Local chart directory — a checkout of GlueOps/platform-helm-chart-platform (Tab completes, empty = back, Ctrl-C exits captain_utils):"
+    if ! dir=$(ask_dir "$PLATFORM_CHART_DIR_PREFILL"); then return 0; fi
+    if [ -z "$dir" ]; then return 0; fi
+    handle_platform_custom_dir "$dir" "$overrides_file" || true
+    return 0
+}
+
 handle_argocd() {
     if [ "$environment" = "production" ]; then
         argocd_version=`yq '.versions[] | select(.name == "argocd_helm_chart_version") | .version' VERSIONS/glueops.yaml`
@@ -97,9 +190,7 @@ handle_argocd() {
     fi
     while true; do
         unset helm_diff_cmd # Clear variables to avoid stale values
-        local pre_commands=""
         local versions=() # Initialize versions array for each iteration
-        local chosen_crd_version="" # To store the chosen CRD version
         # Show version selection
         versions=("${argocd_version[@]}")
         target_file="argocd.yaml"
@@ -115,20 +206,31 @@ handle_argocd() {
 
         helm_diff_cmd="helm diff --color upgrade \"$component\" \"$chart_name\" --version \"$version\" -f \"$target_file\" -n \"$namespace\" --allow-unreleased"
         
-        # New: Select ArgoCD CRD version if argocd is chosen
-        gum style --bold --foreground 212 "Select ArgoCD App Version:"
-        if [ "$environment" = "production" ]; then
-            local argocd_crd_versions=`yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml`
+        # ArgoCD's CRDs: on clusters that pin platform_crds_version they come from the platform-crds bundle (menu
+        # item "crds", run before and after this step) and nothing is applied here. Clusters without the pin keep
+        # the legacy path below: apply ArgoCD's CRDs from upstream before the helm upgrade (the chart runs with
+        # --skip-crds either way).
+        local pre_commands=""
+        local chosen_crd_version=""
+        if crds_bundle_enabled; then
+            gum style --foreground 212 "ArgoCD CRDs are managed by the platform-crds bundle (menu item crds) — not applied by this step."
         else
-            local argocd_crd_versions=`v($(helm search repo argo/argo-cd --versions -o json | jq --arg chart_helm_version "$version" -r '.[] | select(.version == $chart_helm_version).app_version' | sed 's/^v//'))`
+            gum style --bold --foreground 212 "Select ArgoCD App Version (legacy CRD install — this cluster is not on the platform-crds bundle):"
+            local argocd_crd_versions=()
+            if [ "$environment" = "production" ]; then
+                mapfile -t argocd_crd_versions < <(yq '.versions[] | select(.name == "argocd_app_version") | .version' VERSIONS/glueops.yaml)
+            else
+                mapfile -t argocd_crd_versions < <(helm search repo argo/argo-cd --versions -o json | jq -r --arg v "$version" '.[] | select(.version == $v).app_version')
+            fi
+            chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Skip" "Back")
+            if [ "$chosen_crd_version" = "Back" ]; then
+                return
+            fi
+            if [ "$chosen_crd_version" != "Skip" ]; then
+                pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
+            fi
         fi
-        chosen_crd_version=$(gum choose "${argocd_crd_versions[@]}" "Back")
-        pre_commands="kubectl apply -k \"https://github.com/argoproj/argo-cd/manifests/crds?ref=$chosen_crd_version\" && helm repo update"
-        # Check if user wants to go back
-        if [ "$chosen_crd_version" = "Back" ]; then
-            return
-        fi
-        
+
         set -x
         eval "$helm_diff_cmd | gum pager" # Execute the main helm diff command
         gum style --bold --foreground 212 "✅ Diff complete."
@@ -141,13 +243,12 @@ handle_argocd() {
         # Running helm diff command
         gum style --bold --foreground 212 "The following commands will be executed:"
         
-        # New: Execute pre_commands if defined
-        if [ -n "$pre_commands" ] && [ -n "$chosen_crd_version" ]; then
+        # Legacy CRD install (clusters without the platform_crds_version pin only)
+        if [ -n "$pre_commands" ]; then
             gum style --bold --foreground 212 "Executing pre-commands for $component:"
             set -x
-            eval "$pre_commands"
-            if [ $? -ne 0 ]; then
-                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting diff."
+            if ! eval "$pre_commands"; then
+                gum style --bold --foreground 196 "❌ Pre-commands failed. Aborting."
                 set +x
                 continue # Allow user to retry or go back
             fi
@@ -227,7 +328,7 @@ handle_inspect_pods() {
 
 show_production(){
     while true; do
-        component=$(gum choose "show_diff_table" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
+        component=$(gum choose "show_diff_table" "crds" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
 
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -248,6 +349,12 @@ show_production(){
             handle_platform_upgrades
         fi
 
+        # crds (platform-crds bundle) must be run BEFORE argocd and AGAIN AFTER argocd:
+        # the argocd release drops the Gate CRD it used to own and the second run recreates it.
+        if [ "$component" = "crds" ]; then
+            handle_crds
+        fi
+
         if [ "$component" = "argocd" ]; then
             handle_argocd
         fi
@@ -261,7 +368,7 @@ show_production(){
 
 show_dev(){
     while true; do
-        component=$(gum choose "argocd" "glueops-platform" "aws" "Exit")
+        component=$(gum choose "crds" "argocd" "glueops-platform" "aws" "Exit")
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -277,6 +384,12 @@ show_dev(){
             handle_platform_upgrades
         fi
 
+        # crds (platform-crds bundle) must be run BEFORE argocd and AGAIN AFTER argocd:
+        # the argocd release drops the Gate CRD it used to own and the second run recreates it.
+        if [ "$component" = "crds" ]; then
+            handle_crds
+        fi
+
         if [ "$component" = "argocd" ]; then
             handle_argocd
         fi
@@ -285,6 +398,7 @@ show_dev(){
     done
 }
 
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0   # sourced by the tests (.devcontainer/tests/captain_utils): definitions only, no menu
 check_codespace_version_match
 run_prerequisite_commands
 

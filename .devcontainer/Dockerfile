@@ -61,6 +61,10 @@ RUN for file in /etc/tools/*; do \
         fi; \
     done && \
     rm -rf /etc/tools
+
+# Internal helpers that must stay OFF the PATH (run by captain_utils by absolute path, not by people)
+COPY libexec/ /usr/local/libexec/
+RUN chmod -R a+rX /usr/local/libexec && chmod +x /usr/local/libexec/captain_utils/crds
     
 RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL}/bin/linux/amd64/kubectl \
     && chmod +x /usr/local/bin/kubectl \
