@@ -9,6 +9,9 @@
 #
 # usage:  /usr/local/libexec/captain_utils/crds target-version   prints the version to apply, "custom" or "Back" (dev: chooser)
 #         /usr/local/libexec/captain_utils/crds apply <version>  e.g. apply v0.0.1 — returns 0 on success or decline
+#         /usr/local/libexec/captain_utils/crds release-owners     retract stale Apply records another installer left
+#                                                                on the bundle's CRDs (dry-run guarded; skips anything
+#                                                                whose content it would change)
 #         /usr/local/libexec/captain_utils/crds apply-dir <dir>  same flow from a local GlueOps/platform-crds checkout
 #                                                                (Chart.yaml + crds/ as rendered by hack/render.sh)
 # env:    environment=production|dev (default production; production reads VERSIONS/glueops.yaml in $PWD)
@@ -174,6 +177,50 @@ crds_show_drift() {   # $1 = bundle file, $2 = work dir
     printf '%s\n' "$drift"
 }
 
+# crds_foreign_owners LIVE_OWNED_JSON — "crd manager" for every Apply record held by someone other than us.
+# ArgoCD applied these CRDs before the layer-0 migration; its Apply record survives both our apply and our replace,
+# because replace is an Update and only records ownership for values it changes. The record is false once no
+# Application renders CRDs, and it never decays, so it misleads anyone inspecting ownership later.
+crds_foreign_owners() {
+    jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | . as $c | .metadata.managedFields[]?
+        | select(.operation == "Apply" and .manager != $m)
+        | "\($c.metadata.name) \(.manager)"' "$1" | LC_ALL=C sort -u
+}
+
+# Retract those records. Only a manager can release its own Apply claim, so this re-applies a minimal object AS that
+# manager — which also DELETES any field only that manager owns. Every CRD is therefore server-dry-run first and
+# skipped if the result would differ from live. Scoped to CRDs we own, so nothing outside the bundle is touched.
+crds_release_owners() {
+    local wd foreign done_n=0 skip_n=0 crd mgr live dry shell
+    wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds-owners.XXXXXX") || return 1
+    kubectl get crd --show-managed-fields -o json > "$wd/all.json" \
+        || { gum style --foreground 196 "❌ cannot list CRDs on the current kube context"; rm -rf "$wd"; return 1; }
+    jq -c --arg m "$CRDS_FIELD_MANAGER" '[.items[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length > 0)]' "$wd/all.json" > "$wd/ours.json"
+    foreign=$(crds_foreign_owners "$wd/ours.json")
+    if [ -z "$foreign" ]; then
+        gum style --foreground 212 "✅ no stale Apply records: $CRDS_FIELD_MANAGER is the only applier of the bundle's CRDs"
+        rm -rf "$wd"; return 0
+    fi
+    gum style --bold --foreground 212 "$(printf '%s\n' "$foreign" | wc -l) stale Apply record(s) on CRDs owned by $CRDS_FIELD_MANAGER:"
+    while read -r crd mgr; do
+        [ -n "$crd" ] || continue
+        shell=$(printf 'apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: %s\n' "$crd")
+        live=$(kubectl get crd "$crd" -o json | jq -S '{l:(.metadata.labels//{}), a:(.metadata.annotations//{}), s:.spec}')
+        dry=$(printf '%s' "$shell" | kubectl apply --server-side --dry-run=server --field-manager="$mgr" -f - -o json 2>/dev/null \
+              | jq -S '{l:(.metadata.labels//{}), a:(.metadata.annotations//{}), s:.spec}') || dry=""
+        if [ -z "$dry" ] || [ "$live" != "$dry" ]; then
+            gum style --foreground 214 "  SKIP     $crd ($mgr) — releasing would change the object: $mgr solely owns something here"
+            skip_n=$((skip_n+1)); continue
+        fi
+        printf '%s' "$shell" | kubectl apply --server-side --field-manager="$mgr" -f - >/dev/null \
+            || { gum style --foreground 196 "  ❌ FAILED   $crd ($mgr)"; skip_n=$((skip_n+1)); continue; }
+        echo "  released $crd ($mgr)"
+        done_n=$((done_n+1))
+    done <<< "$foreign"
+    rm -rf "$wd"
+    gum style --foreground 212 "released $done_n, skipped $skip_n"
+}
+
 crds_scope() {   # $1 = work dir, $2 = CRDs selected for this cluster; "83 of 85 — some profiles off" when they differ
     local union; union=$(cat "$1/union.count" 2>/dev/null || echo 0)
     if [ "$union" -gt "$2" ] 2>/dev/null; then echo "$2 of $union CRDs — profiles not enabled on this cluster are excluded"
@@ -286,14 +333,17 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
+    local stale; stale=$(crds_foreign_owners "$wd/live-owned.json" | wc -l)
+    [ "$stale" -eq 0 ] || gum style --foreground 214 "note: $stale stale Apply record(s) from a previous installer remain on these CRDs (harmless, but they misreport ownership) — run 'captain_utils/crds release-owners' to retract them"
 }
 
-usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir>   (see the header of this file)"; }
+usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir> | release-owners   (see the header of this file)"; }
 
 case "${1:-}" in
     target-version) crds_target_version ;;
     apply)          crds_apply "${2:-}" ;;
     apply-dir)      crds_apply_dir "${2:-}" ;;
+    release-owners) crds_release_owners ;;
     -h|--help)      usage ;;
     *)              usage >&2; exit 2 ;;
 esac
