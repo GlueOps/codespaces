@@ -358,21 +358,15 @@ dev() {
     
     [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
 
-    # Regional sish endpoint written by cloud-init on newer VMs; older VMs
-    # have no file and stay on the legacy central tunnel.
-    TUNNEL_ENDPOINT="tunnels.glueopshosted.com"
+    # Regional sish endpoint, written by cloud-init from the region's
+    # tunnel_endpoint config. No fallback: every region declares one, and the
+    # VM always binds its bare hostname, so a missing endpoint — or the
+    # retired central host, which prefixes the SSH username onto binds — can
+    # only produce an access URL nothing serves. Fail loudly instead.
+    TUNNEL_ENDPOINT=""
     if [ -s /etc/glueops/tunnel_endpoint ]; then
-        _regional_endpoint="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
-        [ -n "$_regional_endpoint" ] && TUNNEL_ENDPOINT="$_regional_endpoint"
+        TUNNEL_ENDPOINT="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
     fi
-
-    # Legacy central sish runs --append-user-to-subdomain: bind "cde" + the
-    # SSH username -> cde-<hostname>.tunnels.glueopshosted.com. Regional
-    # instances don't; the VM binds its bare hostname so URLs are just
-    # <hostname>.<region>.tunnels.cde.glueopshosted.com. The slackbot derives
-    # the access URL from the same endpoint-value rule, so keep them in sync.
-    TUNNEL_BIND="cde"
-    [ "$TUNNEL_ENDPOINT" != "tunnels.glueopshosted.com" ] && TUNNEL_BIND="$HOSTNAME"
 
     # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
     # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
@@ -385,13 +379,30 @@ dev() {
     sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
 
     if [ -n "$CDE_TOKEN" ]; then
+        # A bad endpoint costs the tunnel and nothing else: the container
+        # bootstrap above already ran, and serve-web below still starts, so
+        # the editor stays usable over the tailnet while the public URL is
+        # dead. Loud on the console, but never a reason to withhold the IDE.
+        TUNNEL_OK=1
+        if [ -z "$TUNNEL_ENDPOINT" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "/etc/glueops/tunnel_endpoint is missing or empty — this region has no tunnel endpoint configured." \
+                "The public CDE URL will not work; reach this VM over Tailscale instead." >&2
+            TUNNEL_OK=0
+        elif [ "$TUNNEL_ENDPOINT" = "tunnels.glueopshosted.com" ]; then
+            gum style --padding "0 1" --foreground=196 --bold \
+                "❌ ERROR:" "This region still points at the retired central tunnel; it must use a regional endpoint." \
+                "The public CDE URL will not work; reach this VM over Tailscale instead." >&2
+            TUNNEL_OK=0
+        fi
+
         # IdentitiesOnly keeps a forwarded ssh-agent (present when dev is
         # re-run from a tmux session after an SSH login) from offering its
         # keys first: sish's TOFU auth permanently pins the first accepted
         # key per username, so an agent key winning the first-ever connection
         # locks the VM out once that agent is gone. It also avoids blowing
         # the server's MaxAuthTries budget on agent keys.
-        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R "$TUNNEL_BIND":80:localhost:8000 "$TUNNEL_ENDPOINT"
+        [ "$TUNNEL_OK" = 1 ] && AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R "$HOSTNAME":80:localhost:8000 "$TUNNEL_ENDPOINT"
         # Disable VS Code Workspace Trust so folders open without the "Do you trust the
         # authors…" prompt. Normally a no-op (the server is baked + shimmed at image build);
         # re-shims if a VS Code update pulled a new server. If the prompt comes back, see the
