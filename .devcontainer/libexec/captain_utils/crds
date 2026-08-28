@@ -287,6 +287,11 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     # customresourcecleanup.apiextensions.k8s.io and destroyed the CRD instantly while its custom resources still
     # existed, orphaning them; on a healthy CRD it stripped finalizers other controllers had added. It also PUT without
     # a resourceVersion, silently clobbering concurrent writers. Targeted removal has none of those properties.
+    # live.json was captured before the diff, the pager and the confirm — an unbounded human gap. Re-read it here so
+    # the terminating check sees the cluster as it is NOW, not as it was when the operator started reading.
+    crds_live_json "$file" "$wd/live-pre.json" || return 1
+    crds_strip_argo_tracking "$wd/live-pre.json" || return 1
+    crds_wait_terminating "$wd/live-pre.json" || return 1
     echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
     if ! kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3; then
         gum style --foreground 196 "❌ CRD apply failed"; return 1
@@ -305,6 +310,9 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if [ "$n" -ne "$total" ]; then gum style --foreground 196 "❌ expected $total bundle CRDs live after apply, found $n"; return 1; fi
     unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
+    # Established stays True on a CRD that is being deleted, so the wait above cannot see this
+    local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp) | .metadata.name' "$wd/live-owned.json") || return 1
+    if [ -n "$dying" ]; then gum style --foreground 196 "❌ still terminating after apply (the type is unusable until it clears): $(echo $dying)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
 }
 
