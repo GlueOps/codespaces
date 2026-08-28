@@ -30,6 +30,41 @@ Every step is best-effort and non-fatal; unconfigured inputs are skipped. It run
 
 Because the default GitHub auth is token-based, running `yolo` afterward is a smooth no-op (it detects the existing auth and skips the interactive browser login).
 
+## `captain_utils`: upgrading a cluster
+
+`captain_utils` is the menu an operator drives a cluster upgrade from, run at the captain repo root. Its components
+are chosen in order:
+
+```
+captain_utils → crds              # the layer-0 CRD bundle (GlueOps/platform-crds)
+captain_utils → argocd
+captain_utils → crds              # again — see below
+captain_utils → glueops-platform
+```
+
+**`crds` runs before ArgoCD and again after it.** The bundle is the only installer of platform CRDs — no ArgoCD
+Application renders one — so the CRDs have to exist before ArgoCD is deployed. The second run recreates anything the
+argocd release removed on the way past (docs-argocd ≥ 0.20.0 drops the Gate CRD it used to own); on a cluster that is
+already past that, it reports no changes.
+
+The step applies with `kubectl apply --server-side --force-conflicts --field-manager=glueops-platform-crds` and
+nothing else. It never runs `kubectl replace` on a CRD: that is a whole-object PUT, and it erased `metadata.finalizers`
+on a CRD that was mid-deletion, destroying the type and orphaning every object of it.
+
+Before applying, it prints what the run will do — content changes, any ArgoCD tracking metadata it will strip, and
+whether anything is Terminating — then shows the diff and asks. Declining changes nothing.
+
+```
+crds check          # read-only: 0 in sync with the pinned bundle, 1 drift, 2 failure. Mutates nothing.
+```
+
+A cluster is on the bundle once its captain repo pins `platform_crds_version` in `VERSIONS/glueops.yaml`. Repos that
+predate the pin keep the legacy path, where the argocd step installs ArgoCD's own CRDs.
+
+The command lives at `.devcontainer/libexec/captain_utils/crds`, installed to `/usr/local/libexec/captain_utils/`
+and deliberately off the PATH; its file header carries the full usage and the contract it is held to. Tests:
+`hack/test.sh` (offline, seconds) and `CRDS_TEST_KIND=1 hack/test.sh` for the cluster test.
+
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces

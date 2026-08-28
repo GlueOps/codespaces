@@ -8,7 +8,6 @@ HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(git -C "$HERE" rev-parse --show-topl
 CU=$REPO/.devcontainer/tools/captain_utils.sh
 LIBEXEC=$REPO/.devcontainer/libexec/captain_utils
 LIB=$LIBEXEC/custom.sh
-CRDSBIN=$LIBEXEC/crds
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 FAILS=0; CASES=0
 check() { CASES=$((CASES+1)); if "$@"; then echo "  ok: $*"; else echo "  FAIL: $*"; FAILS=$((FAILS+1)); fi; }
@@ -52,12 +51,9 @@ echo "##### pinned command lines #####"
 # $1 = file the lines must appear in, $2 = the pinned-lines file
 pinned_lines_present() { local line; while IFS= read -r line; do grep -qFx -- "$line" "$1" || { echo "    missing pinned line: $line"; return 1; }; done < "$2"; }
 check pinned_lines_present "$CU" "$HERE/pinned-lines.txt"
-# The CRD step's safety-critical lines. A line-range edit silently deleted the two guard calls once already, and every
-# other test here passed with them gone — bash -n and shellcheck cannot see a function that is defined but never called.
-check pinned_lines_present "$CRDSBIN" "$HERE/pinned-lines-crds.txt"
-# ...and it must never go back to `kubectl replace` on the CRDs: that erased metadata.finalizers and destroyed
-# terminating CRDs. Prose and the storedVersions remediation hint (which replaces custom *resources*) are exempt.
-crds_never_replaces() { [ -z "$(grep -nE 'kubectl replace' "$CRDSBIN" | grep -vE ':[[:space:]]*#' | grep -v 'echo "')" ]; }
-check crds_never_replaces
+# The crds command is no longer guarded by pinned text. Its safety-critical property — a terminating CRD must block the
+# apply — is asserted behaviourally by crds-terminating.sh (stubs, no cluster) and crds-kind.sh (a real finalizer), and
+# structurally by the clearance-token coupling in the file itself. Text guards could see a deleted line but never a
+# broken one; these fail if the guard stops working for any reason, including one nobody predicted.
 
 echo; echo "$(basename "$0"): $CASES assertions, FAILS=$FAILS"; [ "$FAILS" -eq 0 ]
