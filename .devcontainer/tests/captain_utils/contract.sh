@@ -8,6 +8,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); REPO=$(git -C "$HERE" rev-parse --show-topl
 CU=$REPO/.devcontainer/tools/captain_utils.sh
 LIBEXEC=$REPO/.devcontainer/libexec/captain_utils
 LIB=$LIBEXEC/custom.sh
+CRDSBIN=$LIBEXEC/crds
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 FAILS=0; CASES=0
 check() { CASES=$((CASES+1)); if "$@"; then echo "  ok: $*"; else echo "  FAIL: $*"; FAILS=$((FAILS+1)); fi; }
@@ -48,7 +49,15 @@ dockerfile_installs_libexec() { grep -qE '^COPY libexec/ /usr/local/libexec/' "$
 check dockerfile_installs_libexec
 
 echo "##### pinned command lines #####"
-pinned_lines_present() { local line; while IFS= read -r line; do grep -qFx -- "$line" "$CU" || { echo "    missing pinned line: $line"; return 1; }; done < "$HERE/pinned-lines.txt"; }
-check pinned_lines_present
+# $1 = file the lines must appear in, $2 = the pinned-lines file
+pinned_lines_present() { local line; while IFS= read -r line; do grep -qFx -- "$line" "$1" || { echo "    missing pinned line: $line"; return 1; }; done < "$2"; }
+check pinned_lines_present "$CU" "$HERE/pinned-lines.txt"
+# The CRD step's safety-critical lines. A line-range edit silently deleted the two guard calls once already, and every
+# other test here passed with them gone — bash -n and shellcheck cannot see a function that is defined but never called.
+check pinned_lines_present "$CRDSBIN" "$HERE/pinned-lines-crds.txt"
+# ...and it must never go back to `kubectl replace` on the CRDs: that erased metadata.finalizers and destroyed
+# terminating CRDs. Prose and the storedVersions remediation hint (which replaces custom *resources*) are exempt.
+crds_never_replaces() { [ -z "$(grep -nE 'kubectl replace' "$CRDSBIN" | grep -vE ':[[:space:]]*#' | grep -v 'echo "')" ]; }
+check crds_never_replaces
 
 echo; echo "$(basename "$0"): $CASES assertions, FAILS=$FAILS"; [ "$FAILS" -eq 0 ]

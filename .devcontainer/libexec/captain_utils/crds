@@ -22,6 +22,14 @@
 #
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
+# Ctrl-C or SIGTERM mid-run would otherwise leave the work dir (bundle + live JSON) behind, since the rm below only
+# runs on a normal return. Not a RETURN trap — that one would leak into the caller. kubectl diff's own LIVE-/MERGED-
+# dirs under TMPDIR are kubectl's to clean, not ours.
+CRDS_WD=""
+crds_cleanup() { if [ -n "$CRDS_WD" ]; then rm -rf "$CRDS_WD"; CRDS_WD=""; fi; }
+trap crds_cleanup EXIT
+trap 'crds_cleanup; exit 130' INT
+trap 'crds_cleanup; exit 143' TERM
 unset KUBECTL_EXTERNAL_DIFF   # the exit code and hunk headers parsed below assume kubectl's built-in diff
 environment="${environment:-production}"
 
@@ -131,14 +139,19 @@ crds_wait_terminating() {   # $1 = live json file
     local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp != null) | .metadata.name' "$1") || return 1
     if [ -n "$dying" ]; then
         gum style --foreground 212 "Waiting for terminating CRD(s) to disappear: $(echo $dying)"
-        kubectl wait --for=delete crd $dying --timeout=120s >/dev/null || return 1
+        if ! kubectl wait --for=delete crd $dying --timeout=120s >/dev/null; then
+            gum style --foreground 196 "❌ still terminating after 120s — the bundle was NOT applied: $(echo $dying)"
+            echo "   a custom resource with a finalizer is holding the type open; clear them, then re-run"
+            return 1
+        fi
     fi
 }
 
 # Strip stray ArgoCD tracking metadata from the bundle's CRDs (belt-and-braces: Argo has never stamped CRDs —
 # the repo-server skips kube.IsCRD — but a tracked CRD would be auto-pruned once it leaves an app's desired state).
 # NOTE: kubectl.kubernetes.io/last-applied-configuration is deliberately NOT stripped here: kubectl's server-side
-# apply uses it to migrate client-side-apply ownership into our field manager. Leftovers are stripped after the apply.
+# apply uses it to migrate client-side-apply ownership into our field manager, and drops the annotation as part of
+# that migration. Nothing runs after the apply — the migration is the cleanup.
 crds_strip_argo_tracking() {   # $1 = live json file
     local ann lab
     ann=$(jq -r '.[] | select(.metadata.annotations["argocd.argoproj.io/tracking-id"] != null) | .metadata.name' "$1") || return 1
@@ -165,16 +178,18 @@ crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does no
     echo "  $new new, $((chg-new)) changed"
 }
 
-# diff -> confirm -> server-side apply (ALWAYS, also when the diff is empty, so field ownership lands on our manager)
-# -> wait Established -> strip leftovers -> assert ownership. Returns 0 on success or operator decline.
-# crds_apply owns the per-run work dir and removes it on every exit path (a RETURN trap would leak into the caller).
+# diff -> confirm -> re-read live state -> strip Argo tracking / wait out terminating -> server-side apply (ALWAYS,
+# also when the diff is empty, so field ownership lands on our manager) -> wait Established -> assert ownership ->
+# assert nothing is still terminating. Returns 0 on success or operator decline.
+# crds_apply owns the per-run work dir; crds_cleanup removes it on return and the traps at the top cover signal death.
 crds_apply() {   # $1 = version
     local wd rc=0
     crds_valid_version "$1" || return 1
     if [ -d "$CRDS_CHART" ]; then gum style --foreground 196 "❌ CRDS_CHART points at a directory ('$CRDS_CHART') — use apply-dir" >&2; return 1; fi
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
+    CRDS_WD=$wd
     crds_apply_in "$1" "$wd" || rc=$?
-    rm -rf "$wd"
+    crds_cleanup
     return "$rc"
 }
 crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); runs the pinned flow with the bundle rendered from it
@@ -198,8 +213,9 @@ crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); r
     git_info=$(crds_dir_git_info "$dir")
     gum style --foreground 212 --bold "platform-crds $(yq '.version' "$dir/Chart.yaml") from $dir${git_info:+ ($git_info)} — $(ls "$dir"/crds/*.yaml "$dir"/charts/*/crds/*.yaml 2>/dev/null | wc -l) CRD files"
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 1
+    CRDS_WD=$wd
     CRDS_CHART="$dir" crds_apply_in "local" "$wd" || rc=$?
-    rm -rf "$wd"
+    crds_cleanup
     return "$rc"
 }
 crds_dir_git_info() {   # $1 = dir; "branch@sha[, dirty]" when inside a git checkout, empty otherwise (operator GIT_DIR ignored)
@@ -217,7 +233,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     [ -d "$CRDS_CHART" ] || gum style --foreground 245 "bundle source: $CRDS_CHART --version ${v#v}"   # any override shows in the transcript
     total=$(crds_names "$file" | wc -l)
     crds_live_json "$file" "$wd/live.json" || return 1
-    crds_storedversions_check "$file" "$wd/live.json" || return 1
+    crds_storedversions_check "$file" "$wd/live.json" || return 1   # on the pre-diff snapshot on purpose: it gates the diff the operator is shown
     if difftxt=$(kubectl diff --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" 2>&1); then rc=0; else rc=$?; fi
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
     if [ "$rc" -eq 1 ]; then
@@ -232,15 +248,19 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     else
         gum style --foreground 212 "No CRD content changes for platform-crds $v ($(crds_scope "$wd" "$total")) — applying to record ownership"
     fi
-    # apply creates what is missing and moves field ownership onto our manager. It deliberately does NOT remove metadata
-    # a previous installer left on these CRDs (chart labels and the like). SSA cannot remove a field it does not set, and
-    # every mechanism that can is worse: `kubectl replace` erases metadata.finalizers, destroying a terminating CRD and
+    # apply creates what is missing and moves field ownership onto our manager. It deliberately does NOT remove anything
+    # a previous installer left on these CRDs and the bundle does not itself set — chart labels, and also a
+    # spec.conversion webhook an older cert-manager chart wrote. SSA cannot remove a field it does not set, and every
+    # mechanism that can is worse: `kubectl replace` erases metadata.finalizers, destroying a terminating CRD and
     # orphaning its custom resources; a fixed key denylist would delete labels the bundle legitimately ships, since
-    # upstream cert-manager and external-secrets stamp app.kubernetes.io/* on their own CRDs. The leftovers are inert:
-    # nothing reads them, the set does not grow, and `kubectl diff` stays clean because we never apply them.
+    # upstream cert-manager and external-secrets stamp app.kubernetes.io/* on their own CRDs.
+    # The leftovers are inert TODAY: nothing reads chart labels, and a stale spec.conversion is never invoked because
+    # every CRD in the bundle serves exactly one version. REVISIT THIS the first time the bundle serves two versions of
+    # a type — an ordinary upstream API migration — because a webhook pointing at a dead service then breaks reads.
+    # `kubectl diff` shows none of this and never will: it models an apply, so it cannot see what an apply leaves.
     # live.json was captured before the diff, the pager and the confirm — an unbounded human gap. Re-read it here so
     # the terminating check sees the cluster as it is NOW, not as it was when the operator started reading.
-    crds_live_json "$file" "$wd/live-pre.json" || return 1
+    crds_live_json "$file" "$wd/live-pre.json" || { gum style --foreground 196 "❌ cannot re-read CRDs after the confirm — nothing was applied" >&2; return 1; }
     crds_strip_argo_tracking "$wd/live-pre.json" || return 1
     crds_wait_terminating "$wd/live-pre.json" || return 1
     echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
@@ -262,7 +282,7 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     # Established stays True on a CRD that is being deleted, so the wait above cannot see this
     local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp) | .metadata.name' "$wd/live-owned.json") || return 1
-    if [ -n "$dying" ]; then gum style --foreground 196 "❌ still terminating after apply (the type is unusable until it clears): $(echo $dying)"; return 1; fi
+    if [ -n "$dying" ]; then gum style --foreground 196 "❌ the bundle WAS applied, but still terminating (the type is unusable until it clears): $(echo $dying)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
 }
 
