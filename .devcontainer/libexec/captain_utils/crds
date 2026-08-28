@@ -17,9 +17,8 @@
 # CRD profiles: which CRDs a cluster installs is selected from ./platform.yaml (production requires it; dev without one
 # installs every profile). The chart makes every profile key mandatory, so a renamed key fails instead of dropping CRDs.
 #
-# Apply model: `kubectl apply --server-side` (creates, and takes field ownership), then targeted removal of exactly the
-# labels/annotations the bundle does not ship. NOT `kubectl replace`: that erased metadata.finalizers, destroying a
-# terminating CRD outright and orphaning its custom resources.
+# Apply model: `kubectl apply --server-side --force-conflicts`, and nothing else. NOT `kubectl replace`: that erased
+# metadata.finalizers, destroying a terminating CRD outright and orphaning its custom resources.
 #
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
@@ -154,49 +153,6 @@ crds_strip_argo_tracking() {   # $1 = live json file
     fi
 }
 
-# crds_metadata_drift BUNDLE LIVE_JSON — labels/annotations the live CRDs carry that the bundle does not ship.
-# The apply cannot remove these: server-side apply only manages fields it sets. The replace that follows does.
-# Shown before the confirm because `kubectl diff` models apply and would not reveal them.
-crds_metadata_drift() {
-    yq -N -o=json -I0 'select(type == "!!map" and .kind=="CustomResourceDefinition") | {"n": .metadata.name, "l": (.metadata.labels // {} | keys), "a": (.metadata.annotations // {} | keys)}' "$1" \
-      | jq -rs --slurpfile livef "$2" '$livef[0] as $live
-          | map(select(.n != null)) | map({(.n): .}) | add as $b
-          | $live[] | .metadata.name as $n | select($b[$n] != null)
-          | (((.metadata.labels // {}) | keys) - $b[$n].l) as $dl
-          | (((.metadata.annotations // {}) | keys) - $b[$n].a) as $da
-          | (if ($dl|length) > 0 then "  \($n) [labels] \($dl|join(" "))" else empty end),
-            (if ($da|length) > 0 then "  \($n) [annotations] \($da|join(" "))" else empty end)'
-}
-
-# Remove exactly the labels/annotations the bundle does not ship. Unlike a whole-object replace this touches nothing
-# else — no finalizers, no ownerReferences, no fields another controller owns — and only CRDs that actually drifted.
-crds_prune_metadata() {   # $1 = bundle file, $2 = work dir
-    local drift line crd kind keys k n=0
-    crds_live_json "$1" "$2/live-prune.json" || return 1
-    drift=$(crds_metadata_drift "$1" "$2/live-prune.json" 2>/dev/null || true)
-    [ -n "$drift" ] || return 0
-    while read -r line; do
-        [ -n "$line" ] || continue
-        crd=$(awk '{print $1}' <<<"$line"); kind=$(awk '{print $2}' <<<"$line" | tr -d '[]'); keys=$(cut -d' ' -f3- <<<"$line")
-        local -a args=(); for k in $keys; do args+=("$k-"); done
-        [ "${#args[@]}" -gt 0 ] || continue
-        case "$kind" in
-            labels)      kubectl label crd "$crd" "${args[@]}" >/dev/null || { gum style --foreground 196 "❌ could not remove labels from $crd"; return 1; } ;;
-            annotations) kubectl annotate crd "$crd" "${args[@]}" >/dev/null || { gum style --foreground 196 "❌ could not remove annotations from $crd"; return 1; } ;;
-            *) continue ;;
-        esac
-        echo "  pruned $crd [$kind] $keys"; n=$((n+1))
-    done <<< "$drift"
-    [ "$n" -eq 0 ] || gum style --foreground 212 "pruned metadata the bundle does not ship from $n CRD/field-set(s)"
-}
-
-crds_show_drift() {   # $1 = bundle file, $2 = work dir
-    local drift; drift=$(crds_metadata_drift "$1" "$2/live.json" 2>/dev/null || true)
-    [ -n "$drift" ] || return 0
-    gum style --foreground 214 "metadata these CRDs carry that the bundle does not ship — it will be removed after the apply (the diff above cannot show this):"
-    printf '%s\n' "$drift"
-}
-
 crds_scope() {   # $1 = work dir, $2 = CRDs selected for this cluster; "83 of 85 — some profiles off" when they differ
     local union; union=$(cat "$1/union.count" 2>/dev/null || echo 0)
     if [ "$union" -gt "$2" ] 2>/dev/null; then echo "$2 of $union CRDs — profiles not enabled on this cluster are excluded"
@@ -266,7 +222,6 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
     if [ "$rc" -eq 1 ]; then
         gum style --bold --foreground 212 "CRD changes for platform-crds $v ($(crds_scope "$wd" "$total")):"; crds_summary "$difftxt"
-        crds_show_drift "$file" "$wd"
         if [ -t 1 ]; then echo "$difftxt" | gum pager; else echo "$difftxt"; fi
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
             if ! gum confirm "Apply platform-crds $v?"; then
@@ -276,17 +231,13 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
         fi
     else
         gum style --foreground 212 "No CRD content changes for platform-crds $v ($(crds_scope "$wd" "$total")) — applying to record ownership"
-        crds_show_drift "$file" "$wd"
     fi
-    # apply creates what is missing and moves field ownership onto our manager. It cannot remove metadata a previous
-    # installer left behind (SSA only manages fields it sets), so crds_prune_metadata below deletes exactly the keys the
-    # bundle does not ship.
-    #
-    # This was a whole-object `kubectl replace`, which was wrong and dangerous: replace sends the bundle document
-    # verbatim, so it also erased metadata.finalizers. On a CRD the API server was deleting that removed
-    # customresourcecleanup.apiextensions.k8s.io and destroyed the CRD instantly while its custom resources still
-    # existed, orphaning them; on a healthy CRD it stripped finalizers other controllers had added. It also PUT without
-    # a resourceVersion, silently clobbering concurrent writers. Targeted removal has none of those properties.
+    # apply creates what is missing and moves field ownership onto our manager. It deliberately does NOT remove metadata
+    # a previous installer left on these CRDs (chart labels and the like). SSA cannot remove a field it does not set, and
+    # every mechanism that can is worse: `kubectl replace` erases metadata.finalizers, destroying a terminating CRD and
+    # orphaning its custom resources; a fixed key denylist would delete labels the bundle legitimately ships, since
+    # upstream cert-manager and external-secrets stamp app.kubernetes.io/* on their own CRDs. The leftovers are inert:
+    # nothing reads them, the set does not grow, and `kubectl diff` stays clean because we never apply them.
     # live.json was captured before the diff, the pager and the confirm — an unbounded human gap. Re-read it here so
     # the terminating check sees the cluster as it is NOW, not as it was when the operator started reading.
     crds_live_json "$file" "$wd/live-pre.json" || return 1
@@ -300,7 +251,6 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     if ! kubectl wait --for=condition=Established crd $(crds_names "$file" | xargs) --timeout=120s > /dev/null; then
         gum style --foreground 196 "❌ some CRDs did not become Established"; return 1
     fi
-    crds_prune_metadata "$file" "$wd" || return 1
     local names_json n
     names_json=$(crds_names "$file" | jq -R . | jq -sc .) || return 1
     kubectl get crd --show-managed-fields -o json \
