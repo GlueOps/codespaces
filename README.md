@@ -54,6 +54,11 @@ on a CRD that was mid-deletion, destroying the type and orphaning every object o
 Before applying, it prints what the run will do — content changes, any ArgoCD tracking metadata it will strip, and
 whether anything is Terminating — then shows the diff and asks. Declining changes nothing.
 
+**It never writes without a yes.** When nothing differs it says so and offers a re-apply rather than doing one, so the
+second run above normally reports `in sync, nothing applied` and stops. Answering yes is still useful when there is
+tracking metadata to strip or field ownership to consolidate — neither of which a diff can show. Without a terminal it
+skips quietly and exits 0; `CRDS_AUTO_CONFIRM=yes` answers yes, as it does everywhere else.
+
 ```
 crds check          # read-only: 0 in sync with the pinned bundle, 1 drift, 2 failure. Mutates nothing.
 ```
