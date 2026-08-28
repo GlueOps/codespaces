@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.159.1](https://github.com/GlueOps/codespaces/compare/v0.159.0...v0.159.1) (2026-08-28)
+
+
+### Code Refactoring
+
+* **crds:** replace the text guards with structure and behavioural tests ([#574](https://github.com/GlueOps/codespaces/issues/574)) ([0c6ad8f](https://github.com/GlueOps/codespaces/commit/0c6ad8f4741b4b69976be4dfd7243b114474c579))
+
 ## [0.159.0](https://github.com/GlueOps/codespaces/compare/v0.158.0...v0.159.0) (2026-08-28)
 
 
