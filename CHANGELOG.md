@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.159.0](https://github.com/GlueOps/codespaces/compare/v0.158.0...v0.159.0) (2026-08-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* metadata the bundle does not ship is now removed key-by-key rather than by whole-object replace. The observable result is the same minus the collateral.
+
+### Bug Fixes
+
+* stop using kubectl replace on CRDs — it strips finalizers and destroys terminating CRDs ([#572](https://github.com/GlueOps/codespaces/issues/572)) ([c26ad8f](https://github.com/GlueOps/codespaces/commit/c26ad8f96ddf9574909e8d0331a45485b8f1634c))
+
 ## [0.158.0](https://github.com/GlueOps/codespaces/compare/v0.157.0...v0.158.0) (2026-08-27)
 
 
