@@ -192,32 +192,33 @@ crds_foreign_owners() {
 # bundle exists to prevent. Amber, not red: red in this tool means "nothing was applied", and everything was applied.
 crds_warn_foreign_owners() {   # $1 = live-owned json
     local stale n
-    stale=$(crds_foreign_owners "$1") || return 0
-    [ -n "$stale" ] || return 0
+    stale=$(crds_foreign_owners "$1") || return 1
+    [ -n "$stale" ] || return 1
     n=$(printf '%s\n' "$stale" | wc -l)
     gum style --bold --foreground 214 "⚠  $n stale Apply record(s): a previous installer still shows as an owner of these CRDs"
     printf '%s\n' "$stale" | head -10 | sed 's/^/     /'
     [ "$n" -gt 10 ] && echo "     ... and $((n - 10)) more"
-    gum style --foreground 214 "   ownership is misreported until you run:  captain_utils/crds release-owners"
-    gum style --foreground 214 "   if this cluster was already cleaned, something is rendering these CRDs again — investigate before retracting"
+    gum style --foreground 214 "   retracting them below. If this warning returns on a cluster already cleaned, something is rendering these CRDs again — fix that, not the record."
     return 0
 }
 
 # Retract those records. Only a manager can release its own Apply claim, so this re-applies a minimal object AS that
 # manager — which also DELETES any field only that manager owns. Every CRD is therefore server-dry-run first and
 # skipped if the result would differ from live. Scoped to CRDs we own, so nothing outside the bundle is touched.
-crds_release_owners() {
-    local wd foreign done_n=0 skip_n=0 crd mgr live dry shell
+crds_release_owners() {   # $1 = optional snapshot of CRDs we own (else fetched); never fails the caller
+    local wd foreign done_n=0 skip_n=0 crd mgr live dry shell ours=${1:-}
     wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds-owners.XXXXXX") || return 1
-    kubectl get crd --show-managed-fields -o json > "$wd/all.json" \
-        || { gum style --foreground 196 "❌ cannot list CRDs on the current kube context"; rm -rf "$wd"; return 1; }
-    jq -c --arg m "$CRDS_FIELD_MANAGER" '[.items[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length > 0)]' "$wd/all.json" > "$wd/ours.json"
-    foreign=$(crds_foreign_owners "$wd/ours.json")
+    if [ -z "$ours" ]; then
+        kubectl get crd --show-managed-fields -o json > "$wd/all.json" \
+            || { gum style --foreground 196 "❌ cannot list CRDs on the current kube context"; rm -rf "$wd"; return 1; }
+        jq -c --arg m "$CRDS_FIELD_MANAGER" '[.items[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length > 0)]' "$wd/all.json" > "$wd/ours.json"
+        ours="$wd/ours.json"
+    fi
+    foreign=$(crds_foreign_owners "$ours")
     if [ -z "$foreign" ]; then
         gum style --foreground 212 "✅ no stale Apply records: $CRDS_FIELD_MANAGER is the only applier of the bundle's CRDs"
         rm -rf "$wd"; return 0
     fi
-    gum style --bold --foreground 212 "$(printf '%s\n' "$foreign" | wc -l) stale Apply record(s) on CRDs owned by $CRDS_FIELD_MANAGER:"
     while read -r crd mgr; do
         [ -n "$crd" ] || continue
         shell=$(printf 'apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: %s\n' "$crd")
@@ -349,7 +350,13 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
     if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
-    crds_warn_foreign_owners "$wd/live-owned.json"
+    if crds_warn_foreign_owners "$wd/live-owned.json"; then
+        if [ "${CRDS_KEEP_STALE_OWNERS:-}" = "yes" ]; then
+            gum style --foreground 214 "   CRDS_KEEP_STALE_OWNERS=yes — not retracting"
+        else
+            crds_release_owners "$wd/live-owned.json" || true
+        fi
+    fi
 }
 
 usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir> | release-owners   (see the header of this file)"; }
