@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.160.0](https://github.com/GlueOps/codespaces/compare/v0.159.1...v0.160.0) (2026-08-28)
+
+
+### Features
+
+* **crds:** offer a re-apply when nothing differs, instead of doing one ([#578](https://github.com/GlueOps/codespaces/issues/578)) ([67728cb](https://github.com/GlueOps/codespaces/commit/67728cba93f94bf06e13696e8246c5db308468ff))
+
 ## [0.159.1](https://github.com/GlueOps/codespaces/compare/v0.159.0...v0.159.1) (2026-08-28)
 
 
