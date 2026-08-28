@@ -115,4 +115,15 @@ run "F. clean diff + CRDS_AUTO_CONFIRM=yes: still applies (automation unchanged)
 expect "KUBECTL APPLY REACHED"
 expect "RC=0"
 
+# The hole the offer path opened, and the reason "clean diff" is not the same as "fine": a CRD that is mid-deletion
+# still has its spec, so it diffs identically -- yet it is about to vanish. That is the Gate CRD case (the argocd
+# release deletes it; this run recreates it). Reporting "in sync" there would send an operator away from a cluster
+# that is losing a type.
+run_interactive "G. clean diff but terminating: refuses loudly, never reports in sync" env GET_TERMINATING_FROM=1 KUBECTL_DIFF_RC=0
+expect "still terminating"
+expect "re-run once it clears"
+refute "in sync, nothing applied"
+refute "KUBECTL APPLY REACHED"
+expect "RC=1"
+
 echo; echo "$(basename "$0"): $CASES assertions, FAILS=$FAILS"; [ "$FAILS" -eq 0 ]

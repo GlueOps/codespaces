@@ -238,8 +238,9 @@ crds_in_sync() {   # $1 = version, $2 = work dir, $3 = CRDs in the bundle — th
 
 # Whether there is a REASON to re-apply is already computed for the plan block; the prompt says so rather than making
 # the operator infer it. This is wording driven by data on hand, not the tool deciding for them.
-crds_reapply_prompt() {   # $1 = version, $2 = live json
+crds_reapply_prompt() {   # $1 = version, $2 = live json, $3 = terminating CRDs (may be empty)
     local ann lab n
+    if [ -n "${3:-}" ]; then echo "$(crds_count "$3") CRD(s) are terminating and will disappear. Apply to wait for them and recreate?"; return 0; fi
     ann=$(crds_argo_tracked "$2" annotation) || return 1
     lab=$(crds_argo_tracked "$2" label) || return 1
     n=$(( $(crds_count "$ann") + $(crds_count "$lab") ))
@@ -352,11 +353,20 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
         # completes the client-side -> server-side migration that drops kubectl.kubernetes.io/last-applied-configuration.
         # `kubectl diff` can show none of that, so rather than deciding from an "is there anything to do" test that can
         # never be complete, report what can be proven and let the operator answer.
+        # ...but a bundle CRD that is mid-deletion is NOT "in sync", however clean the diff looks: it still has its spec,
+        # so it diffs identically, and it is about to disappear. That is the Gate CRD case exactly — the argocd release
+        # deletes it and this run is what recreates it. Never report success there; say so and fail, so a declined or
+        # non-interactive run cannot leave the type quietly on its way out.
+        local dying_now; dying_now=$(crds_terminating "$wd/live.json") || return 1
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
             # Not a terminal: skip quietly and succeed. This path never prompted before, so failing here would break
             # every scripted caller that legitimately has nothing to do.
-            if [ ! -t 0 ]; then crds_in_sync "$v" "$wd" "$total"; return 0; fi
-            if ! gum confirm "$(crds_reapply_prompt "$v" "$wd/live.json")"; then
+            if [ ! -t 0 ] || ! gum confirm "$(crds_reapply_prompt "$v" "$wd/live.json" "$dying_now")"; then
+                if [ -n "$dying_now" ]; then
+                    gum style --foreground 196 "❌ not applied, and $(crds_count "$dying_now") CRD(s) are still terminating: $(echo $dying_now)"
+                    echo "   the type disappears when deletion completes — re-run once it clears, or answer yes to wait and recreate it"
+                    return 1
+                fi
                 crds_in_sync "$v" "$wd" "$total"; return 0
             fi
         fi
