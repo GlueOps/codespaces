@@ -67,6 +67,27 @@ ok "owned by glueops-platform-crds" bash -c '
   kubectl get crd widgets.test.glueops.dev --show-managed-fields -o json \
     | jq -e ".metadata.managedFields[] | select(.manager==\"glueops-platform-crds\" and .operation==\"Apply\")" >/dev/null'
 
+# A clean diff no longer applies on its own. resourceVersion is NOT the discriminator here: a server-side apply whose
+# merged result is identical is a true no-op at the API server, so it does not bump it. What genuinely differs is the
+# ArgoCD tracking strip, which runs on the apply path and mutates for real -- so that is what these two cases pin.
+echo "##### A0b. clean diff, no TTY: reports in sync and does NOT strip #####"
+kubectl annotate crd widgets.test.glueops.dev \
+  argocd.argoproj.io/tracking-id=fake:apiextensions.k8s.io/CustomResourceDefinition:default/widgets --overwrite >/dev/null
+( cd "$T/work" && environment=dev CRDS_WAIT_TIMEOUT=15s "$CRDS" apply-dir "$T/bundle"; echo "RC=$?" ) > "$T/out" 2>&1 || echo "RC=$?" >> "$T/out"
+cat "$T/out"
+expect "in sync, nothing applied"
+expect "RC=0"
+refute "serverside-applied"
+ok "tracking annotation survives — the strip did not run" bash -c \
+  'kubectl get crd widgets.test.glueops.dev -o jsonpath="{.metadata.annotations.argocd\.argoproj\.io/tracking-id}" | grep -q fake'
+
+echo "##### A0c. same input, CRDS_AUTO_CONFIRM=yes: applies and strips #####"
+run
+expect "RC=0"
+expect "serverside-applied"
+ok "tracking annotation removed — the strip ran" bash -c \
+  '! kubectl get crd widgets.test.glueops.dev -o jsonpath="{.metadata.annotations.argocd\.argoproj\.io/tracking-id}" | grep -q fake'
+
 echo "##### A1. check after the apply: in sync #####"
 checkdir
 expect "RC=0"

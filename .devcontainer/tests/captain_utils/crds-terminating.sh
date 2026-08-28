@@ -41,7 +41,7 @@ cat > "$T/bin/gum" <<'G'
 #!/bin/bash
 case "$1" in
   style) shift; while [ $# -gt 0 ] && [[ "$1" == --* ]]; do [ "$1" = "--foreground" ] && shift; shift; done; echo "GUM: $*";;
-  confirm) exit 0;; pager) cat;; *) :;;
+  confirm) shift; echo "GUM CONFIRM: $*" >&2; exit "${GUM_CONFIRM_RC:-0}";; pager) cat;; *) :;;
 esac
 G
 # GET_TERMINATING_FROM=N: the Nth and later `kubectl get crd` calls report a deletionTimestamp. The command reads live
@@ -55,9 +55,10 @@ crd() { local dt=""; [ "$1" = dying ] && dt='"deletionTimestamp":"2026-08-28T00:
 case "$1 ${2:-}" in
   "get crd")   n=$((n+1)); echo "$n" > "$KSTATE"
                if [ "$n" -ge "${GET_TERMINATING_FROM:-1}" ]; then crd dying; else crd clean; fi; exit 0;;
-  "diff "*)    echo "diff -u -N a/widgets b/widgets"; exit 1;;                       # drift, so the confirm path runs
+  "diff "*)    [ "${KUBECTL_DIFF_RC:-1}" = 0 ] && exit 0; echo "diff -u -N a/widgets b/widgets"; exit 1;;
   "annotate "*|"label "*) echo "KUBECTL STRIP $*" >&2; exit 0;;
-  "wait "*)    echo "KUBECTL WAIT $*" >&2; exit 1;;                                  # never clears, as a real finalizer would not
+  "wait "*)    echo "KUBECTL WAIT $*" >&2                                            # --for=delete never clears, as a real
+               case "$*" in *--for=delete*) exit 1;; *) exit 0;; esac;;                #   finalizer would not; Established succeeds
   "apply "*)   echo "KUBECTL APPLY REACHED $*"; exit 0;;                             # must never happen
 esac
 echo "KUBECTL $*"; exit 0
@@ -68,6 +69,13 @@ export PATH="$T/bin:$PATH" KSTATE="$T/kstate"
 run() { local name=$1; shift; : > "$KSTATE"
   echo "##### $name #####"
   ( cd "$T/work" && environment=dev CRDS_AUTO_CONFIRM=yes CRDS_WAIT_TIMEOUT=1s "$@" "$CRDS" apply-dir "$T/bundle"; echo "RC=$?" ) > "$T/out" 2>&1 || echo "RC=$?" >> "$T/out"
+  cat "$T/out"; }
+
+# Same, but WITHOUT CRDS_AUTO_CONFIRM: the path where the command must ask before writing. stdout/stderr are captured,
+# so stdin is not a terminal either -- which is itself one of the cases under test.
+run_interactive() { local name=$1; shift; : > "$KSTATE"
+  echo "##### $name #####"
+  ( cd "$T/work" && environment=dev CRDS_WAIT_TIMEOUT=1s "$@" "$CRDS" apply-dir "$T/bundle"; echo "RC=$?" ) > "$T/out" 2>&1 || echo "RC=$?" >> "$T/out"
   cat "$T/out"; }
 
 run "A. terminating from the start: refuses, never applies" env GET_TERMINATING_FROM=1
@@ -82,8 +90,29 @@ expect "still terminating after 1s"          # ...and the post-confirm re-read d
 refute "KUBECTL APPLY REACHED"
 expect "RC=1"
 
-run "C. never terminating: the apply is reached" env GET_TERMINATING_FROM=99
+run "C. never terminating: the apply is reached and succeeds" env GET_TERMINATING_FROM=99
 expect "KUBECTL APPLY REACHED"
 refute "still terminating"
+expect "RC=0"
+
+# ---- no content changes: report and offer, never write unasked ----
+# A clean diff used to apply regardless ("to record ownership"). It is a write, it runs the ArgoCD strip, and it moves
+# field ownership, so it now needs a yes. These three cases pin each answer to that question.
+
+run_interactive "D. clean diff, no TTY: skips quietly, exits 0, writes nothing" env GET_TERMINATING_FROM=99 KUBECTL_DIFF_RC=0
+expect "no content changes"
+expect "in sync, nothing applied"
+refute "KUBECTL APPLY REACHED"
+refute "KUBECTL STRIP"
+expect "RC=0"
+
+run_interactive "E. clean diff, operator declines: writes nothing, exits 0" env GET_TERMINATING_FROM=99 KUBECTL_DIFF_RC=0 GUM_CONFIRM_RC=1
+expect "in sync, nothing applied"
+refute "KUBECTL APPLY REACHED"
+expect "RC=0"
+
+run "F. clean diff + CRDS_AUTO_CONFIRM=yes: still applies (automation unchanged)" env GET_TERMINATING_FROM=99 KUBECTL_DIFF_RC=0
+expect "KUBECTL APPLY REACHED"
+expect "RC=0"
 
 echo; echo "$(basename "$0"): $CASES assertions, FAILS=$FAILS"; [ "$FAILS" -eq 0 ]

@@ -34,6 +34,8 @@
 #     Anything reachable from `check` must be free of them; crds_terminating / crds_argo_tracked / crds_plan are pure.
 #  5. The plan block prints unconditionally, before the diff branch: the no-diff path has no confirm and still strips.
 #  6. Exit codes: `check` uses 1 for drift only, 2 for any failure (as kubectl diff does). apply returns 0 on decline.
+#  6b. The command WRITES only after an explicit yes, or with CRDS_AUTO_CONFIRM=yes. A clean diff is not a licence to
+#      apply: with no changes it reports and offers, and declining (or having no TTY) is a no-op that still exits 0.
 #  7. Waits use $CRDS_WAIT_TIMEOUT, never a literal — the kind test lowers it.
 #  8. Lint clean: `shellcheck -S warning` reports nothing; per-line disables carry a reason.
 #
@@ -221,13 +223,28 @@ crds_plan() {   # $1 = version, $2 = work dir, $3 = live json, $4 = diff text, $
     dying=$(crds_terminating "$3") || return 1
     gum style --bold --foreground 212 "platform-crds $1 — $(crds_scope "$2" "$6")"
     if [ "$5" -eq 1 ]; then crds_summary "$4"
-    else echo "  apply:  no content changes — applied anyway to record field ownership"; fi
+    else echo "  apply:  no content changes"; fi
     echo "  strip:  ArgoCD tracking-id from $(crds_count "$ann"), instance label from $(crds_count "$lab")"
     # Deliberately an observation, not a promise: the documented crds -> argocd -> crds order means the argocd release
     # is itself what creates a terminating CRD, so "none" here can still be followed by a wait after the confirm.
     if [ -n "$dying" ]; then echo "  wait:   $(crds_count "$dying") terminating, the apply waits up to $CRDS_WAIT_TIMEOUT: $(echo $dying)"
     else echo "  wait:   none terminating right now — re-checked after you confirm, a wait may still follow"; fi
     echo "  keep:   chart labels an earlier installer set are NOT removed (the bundle never declares them)"
+}
+
+crds_in_sync() {   # $1 = version, $2 = work dir, $3 = CRDs in the bundle — the "did nothing" line, and it must read as success
+    gum style --foreground 212 "✅ platform-crds $1 — $(crds_scope "$2" "$3" | sed 's/ — profiles not enabled on this cluster are excluded//') in sync, nothing applied"
+}
+
+# Whether there is a REASON to re-apply is already computed for the plan block; the prompt says so rather than making
+# the operator infer it. This is wording driven by data on hand, not the tool deciding for them.
+crds_reapply_prompt() {   # $1 = version, $2 = live json
+    local ann lab n
+    ann=$(crds_argo_tracked "$2" annotation) || return 1
+    lab=$(crds_argo_tracked "$2" label) || return 1
+    n=$(( $(crds_count "$ann") + $(crds_count "$lab") ))
+    if [ "$n" -gt 0 ]; then echo "No content changes, but $n CRD(s) carry ArgoCD tracking metadata. Apply to strip it?"
+    else echo "Nothing to apply. Re-apply platform-crds $1 anyway to refresh field ownership?"; fi
 }
 
 # The mutating pre-apply sequence, and the ONLY producer of the token crds_do_apply demands. Guard output is forced to
@@ -324,6 +341,23 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
             if ! gum confirm "Apply platform-crds $v?"; then
                 if ! [ -t 0 ]; then gum style --foreground 196 "❌ no TTY to confirm on — set CRDS_AUTO_CONFIRM=yes for scripted runs" >&2; return 1; fi
                 gum style --foreground 212 "Skipped platform-crds $v"; return 0
+            fi
+        fi
+    else
+        # Nothing in the bundle differs from the cluster. The apply itself would be close to free — server-side apply
+        # whose merged result is identical is a no-op at the API server and does not even bump resourceVersion
+        # (measured; tests/captain_utils/crds-kind.sh A0b). What is NOT free is the rest of the sequence: the ArgoCD
+        # tracking strip is a real kubectl annotate/label, and it used to run here with no confirmation at all.
+        # Re-applying is still worth doing sometimes — it strips that metadata, consolidates field ownership, and
+        # completes the client-side -> server-side migration that drops kubectl.kubernetes.io/last-applied-configuration.
+        # `kubectl diff` can show none of that, so rather than deciding from an "is there anything to do" test that can
+        # never be complete, report what can be proven and let the operator answer.
+        if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
+            # Not a terminal: skip quietly and succeed. This path never prompted before, so failing here would break
+            # every scripted caller that legitimately has nothing to do.
+            if [ ! -t 0 ]; then crds_in_sync "$v" "$wd" "$total"; return 0; fi
+            if ! gum confirm "$(crds_reapply_prompt "$v" "$wd/live.json")"; then
+                crds_in_sync "$v" "$wd" "$total"; return 0
             fi
         fi
     fi
