@@ -31,4 +31,13 @@ mkdir -p "$T/nosep/crds"; printf 'name: platform-crds\nversion: 1.0.0\n' > "$T/n
 run "C9 apply-dir with a crds/*.yaml not starting with --- refuses" production apply-dir "$T/nosep"
 expect "must start with ---"; refute "HELM"; refute "KUBECTL"; expect "RC=1"
 
+# `check` is read-only, so its refusals matter as much as apply's: a bad version or a bad directory must stop before
+# any helm/kubectl call, and must exit 2 (failure), never 1 (which means drift and would read as "cluster is behind").
+run "C10 check with a garbage version refuses, rc 2" production check latest
+expect "must be a release tag vX.Y.Z"; refute "HELM"; refute "KUBECTL"; expect "RC=2"
+run "C11 check-dir on a non-directory refuses, rc 2" production check-dir "$T/nope"
+expect "is not a directory"; refute "HELM"; refute "KUBECTL"; expect "RC=2"
+run "C12 check-dir on another chart refuses, rc 2" production check-dir "$T/other"
+expect "not platform-crds"; refute "HELM"; refute "KUBECTL"; expect "RC=2"
+
 finish

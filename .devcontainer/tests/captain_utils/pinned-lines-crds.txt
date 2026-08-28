@@ -1,6 +1,0 @@
-    crds_live_json "$file" "$wd/live-pre.json" || { gum style --foreground 196 "❌ cannot re-read CRDs after the confirm — nothing was applied" >&2; return 1; }
-    crds_strip_argo_tracking "$wd/live-pre.json" || return 1
-    crds_wait_terminating "$wd/live-pre.json" || return 1
-    if ! kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3; then
-    if [ -n "$dying" ]; then gum style --foreground 196 "❌ the bundle WAS applied, but still terminating (the type is unusable until it clears): $(echo $dying)"; return 1; fi
-            gum style --foreground 196 "❌ still terminating after 120s — the bundle was NOT applied: $(echo $dying)"

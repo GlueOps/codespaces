@@ -23,3 +23,28 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
       - name: hack/test.sh
         run: ./hack/test.sh
+
+  # The cluster test, kept as its own job so the offline suite above stays a 5-second signal. It proves the one thing
+  # stubs cannot: a real finalizer pins a CRD in Terminating, the apply is refused, and the CRD keeps its finalizers —
+  # which is what `kubectl replace` destroyed.
+  crds-kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # kind is installed rather than used through kind-action: crds-kind.sh creates and destroys its own cluster with
+      # its own kubeconfig, and an action-provided cluster would leave a second one the script does not own.
+      - name: Install kind, helm and gum
+        env:
+          VERSION_KIND: "0.32.0"        # renovate: datasource=github-tags depName=kubernetes-sigs/kind
+          VERSION_CHARM_GUM: "0.17.0"   # renovate: datasource=github-tags depName=charmbracelet/gum
+        run: |
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/v${VERSION_KIND}/kind-linux-amd64"
+          sudo install -m755 kind /usr/local/bin/kind && kind version
+          curl -fsSLo gum.tar.gz "https://github.com/charmbracelet/gum/releases/download/v${VERSION_CHARM_GUM}/gum_${VERSION_CHARM_GUM}_Linux_x86_64.tar.gz"
+          tar -xzf gum.tar.gz && sudo install -m755 gum_*/gum /usr/local/bin/gum && gum --version
+          helm version && kubectl version --client
+      - name: crds-kind.sh
+        env:
+          CRDS_KIND_NODE_IMAGE: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+        run: bash .devcontainer/tests/captain_utils/crds-kind.sh

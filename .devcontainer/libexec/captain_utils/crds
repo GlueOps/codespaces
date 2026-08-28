@@ -8,6 +8,8 @@
 # and a kubeconfig:
 #
 # usage:  /usr/local/libexec/captain_utils/crds target-version   prints the version to apply, "custom" or "Back" (dev: chooser)
+#         /usr/local/libexec/captain_utils/crds check [version]  read-only: 0 in sync, 1 drift, 2 failure. Mutates nothing.
+#         /usr/local/libexec/captain_utils/crds check-dir <dir>   same, against a local checkout (the read-only apply-dir)
 #         /usr/local/libexec/captain_utils/crds apply <version>  e.g. apply v0.0.1 — returns 0 on success or decline
 #         /usr/local/libexec/captain_utils/crds apply-dir <dir>  same flow from a local GlueOps/platform-crds checkout
 #                                                                (Chart.yaml + crds/ as rendered by hack/render.sh)
@@ -19,6 +21,21 @@
 #
 # Apply model: `kubectl apply --server-side --force-conflicts`, and nothing else. NOT `kubectl replace`: that erased
 # metadata.finalizers, destroying a terminating CRD outright and orphaning its custom resources.
+#
+# Contract (run hack/test.sh; structural guards in .devcontainer/tests/captain_utils/contract.sh):
+#  1. ONE `kubectl apply`, inside crds_do_apply, and NEVER `kubectl replace` on a CRD — replace erased
+#     metadata.finalizers, destroying a terminating CRD and orphaning its custom resources.
+#  2. crds_do_apply is reachable only with a token from crds_clearance for the SAME live file. Callers must write
+#     `local c` and `c=$(crds_clearance ...)` as separate statements: `local c=$(...)` returns 0 and drops the guards'
+#     exit status. That coupling catches a deleted call, a dropped `|| return 1`, a missing or stale token; it does NOT
+#     catch a gutted crds_clearance body, which is what tests/captain_utils/crds-terminating.sh is for.
+#  3. Guards report on stderr (crds_clearance redirects them): their `gum style` output is captured into the token.
+#  4. Mutations live in exactly three places — crds_strip_argo_tracking (kubectl annotate/label) and crds_do_apply.
+#     Anything reachable from `check` must be free of them; crds_terminating / crds_argo_tracked / crds_plan are pure.
+#  5. The plan block prints unconditionally, before the diff branch: the no-diff path has no confirm and still strips.
+#  6. Exit codes: `check` uses 1 for drift only, 2 for any failure (as kubectl diff does). apply returns 0 on decline.
+#  7. Waits use $CRDS_WAIT_TIMEOUT, never a literal — the kind test lowers it.
+#  8. Lint clean: `shellcheck -S warning` reports nothing; per-line disables carry a reason.
 #
 # Runs with `set -e -u -o pipefail`; every non-zero exit below is handled explicitly.
 set -e -u -o pipefail
@@ -35,6 +52,9 @@ environment="${environment:-production}"
 
 CRDS_CHART="${CRDS_CHART:-oci://ghcr.repo.gpkg.io/glueops/platform-crds}"   # mirror of ghcr.io/glueops/platform-crds
 CRDS_FIELD_MANAGER="glueops-platform-crds"
+# kubectl wait budget, for BOTH waits below. Overridable so the kind test does not sit for two minutes; production
+# never sets it. A shorter value only makes the command give up sooner — it can never turn a refusal into an apply.
+CRDS_WAIT_TIMEOUT="${CRDS_WAIT_TIMEOUT:-120s}"
 
 crds_valid_version() {   # $1 = version; rejects empty/garbage (an empty --version makes helm pull LATEST)
     if [[ ! "${1:-}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -73,13 +93,16 @@ crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered 
             cat "$2/fetch.err" >&2
             gum style --foreground 196 "❌ platform-crds $1: could not select CRD profiles from platform.yaml (see the error above; a renamed profile key fails here by design)" >&2; return 1
         fi
+        # out.tmp is the profile-selected subset here, so the union needs its own read
+        helm show crds "$src" 2>/dev/null | grep -c '^kind: CustomResourceDefinition' > "$2/union.count" || echo 0 > "$2/union.count"
     elif [ "$environment" = "production" ]; then
         gum style --foreground 196 "❌ no platform.yaml in $PWD — the bundle reads it to pick the CRD profiles for this cluster; run captain_utils from the captain repo root" >&2; return 1
     else
         gum style --foreground 214 "no platform.yaml (dev): installing every profile" >&2
         if ! helm show crds "$src" > "$out.tmp" 2>"$2/fetch.err"; then cat "$2/fetch.err" >&2; return 1; fi
+        # out.tmp IS the union on this path — counting it avoids a second helm call
+        grep -c '^kind: CustomResourceDefinition' "$out.tmp" > "$2/union.count" || echo 0 > "$2/union.count"
     fi
-    helm show crds "$src" 2>/dev/null | grep -c '^kind: CustomResourceDefinition' > "$2/union.count" || echo 0 > "$2/union.count"
     local kinds names other
     kinds=$(grep -c '^kind: CustomResourceDefinition' "$out.tmp") || true
     if [ "$kinds" -eq 0 ]; then
@@ -104,9 +127,10 @@ crds_fetch() {   # $1 = version, $2 = work dir; prints the path of the rendered 
 crds_names() { yq -N 'select(type == "!!map" and .kind=="CustomResourceDefinition") | .metadata.name' "$1"; }
 
 # Live CRD JSON for the bundle's CRDs only (one API call), written to a file (too large for argv/variables).
-crds_live_json() {   # $1 = bundle file, $2 = output file
+crds_live_json() {   # $1 = bundle file, $2 = output file, $3 = "owners" to include managedFields
     local names_json; names_json=$(crds_names "$1" | jq -R . | jq -sc .) || return 1
-    kubectl get crd -o json | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$2" \
+    local -a extra=(); [ "${3:-}" != owners ] || extra=(--show-managed-fields)
+    kubectl get crd "${extra[@]}" -o json | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$2" \
         || { gum style --foreground 196 "❌ cannot list CRDs on the current kube context (kubectl get crd)" >&2; return 1; }
 }
 
@@ -134,13 +158,26 @@ crds_storedversions_check() {   # $1 = bundle file, $2 = live json file
     grep '^WARN' <<<"$bad" | sed 's/^WARN  /  ⚠ /' || true
 }
 
+# Pure readers over a live JSON file: no cluster calls, no mutations. The plan block, the guards, the post-apply
+# assertions and `check` all go through these, so what the operator is shown cannot drift from what the guards act on.
+crds_terminating() {   # $1 = live json file; names of CRDs currently being deleted
+    jq -r '.[] | select(.metadata.deletionTimestamp != null) | .metadata.name' "$1"
+}
+crds_argo_tracked() {   # $1 = live json file, $2 = annotation|label; names carrying ArgoCD tracking metadata
+    case "$2" in
+        annotation) jq -r '.[] | select(.metadata.annotations["argocd.argoproj.io/tracking-id"] != null) | .metadata.name' "$1" ;;
+        label)      jq -r '.[] | select(.metadata.labels["argocd.argoproj.io/instance"] != null) | .metadata.name' "$1" ;;
+        *)          echo "crds_argo_tracked: unknown kind '$2'" >&2; return 1 ;;
+    esac
+}
+
 # A CRD still being deleted (e.g. the Gate CRD right after the argocd release dropped it) must be gone before we re-create it.
 crds_wait_terminating() {   # $1 = live json file
-    local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp != null) | .metadata.name' "$1") || return 1
+    local dying; dying=$(crds_terminating "$1") || return 1
     if [ -n "$dying" ]; then
         gum style --foreground 212 "Waiting for terminating CRD(s) to disappear: $(echo $dying)"
-        if ! kubectl wait --for=delete crd $dying --timeout=120s >/dev/null; then
-            gum style --foreground 196 "❌ still terminating after 120s — the bundle was NOT applied: $(echo $dying)"
+        if ! kubectl wait --for=delete crd $dying --timeout="$CRDS_WAIT_TIMEOUT" >/dev/null; then
+            gum style --foreground 196 "❌ still terminating after $CRDS_WAIT_TIMEOUT — the bundle was NOT applied: $(echo $dying)"
             echo "   a custom resource with a finalizer is holding the type open; clear them, then re-run"
             return 1
         fi
@@ -154,8 +191,8 @@ crds_wait_terminating() {   # $1 = live json file
 # that migration. Nothing runs after the apply — the migration is the cleanup.
 crds_strip_argo_tracking() {   # $1 = live json file
     local ann lab
-    ann=$(jq -r '.[] | select(.metadata.annotations["argocd.argoproj.io/tracking-id"] != null) | .metadata.name' "$1") || return 1
-    lab=$(jq -r '.[] | select(.metadata.labels["argocd.argoproj.io/instance"] != null) | .metadata.name' "$1") || return 1
+    ann=$(crds_argo_tracked "$1" annotation) || return 1
+    lab=$(crds_argo_tracked "$1" label) || return 1
     if [ -n "$ann" ]; then
         gum style --foreground 212 "Removing ArgoCD tracking annotation from: $(echo $ann)"
         kubectl annotate crd $ann argocd.argoproj.io/tracking-id- >/dev/null || return 1
@@ -166,11 +203,55 @@ crds_strip_argo_tracking() {   # $1 = live json file
     fi
 }
 
+crds_count() { [ -n "$1" ] && grep -c . <<<"$1" || echo 0; }   # lines in a possibly-empty list
+
 crds_scope() {   # $1 = work dir, $2 = CRDs selected for this cluster; "83 of 85 — some profiles off" when they differ
     local union; union=$(cat "$1/union.count" 2>/dev/null || echo 0)
     if [ "$union" -gt "$2" ] 2>/dev/null; then echo "$2 of $union CRDs — profiles not enabled on this cluster are excluded"
     else echo "$2 CRDs"; fi
 }
+# Everything this run will do, printed BEFORE the confirm and UNCONDITIONALLY. Not "before the confirm": the confirm
+# only exists on the changed-CRDs branch, while the no-diff branch still strips ArgoCD tracking — so a block placed
+# inside the changed branch would hide precisely the run whose only effect is a mutation. Every count is read from the
+# live JSON already on disk; this adds no cluster call.
+crds_plan() {   # $1 = version, $2 = work dir, $3 = live json, $4 = diff text, $5 = diff rc, $6 = CRDs in the bundle
+    local ann lab dying
+    ann=$(crds_argo_tracked "$3" annotation) || return 1
+    lab=$(crds_argo_tracked "$3" label) || return 1
+    dying=$(crds_terminating "$3") || return 1
+    gum style --bold --foreground 212 "platform-crds $1 — $(crds_scope "$2" "$6")"
+    if [ "$5" -eq 1 ]; then crds_summary "$4"
+    else echo "  apply:  no content changes — applied anyway to record field ownership"; fi
+    echo "  strip:  ArgoCD tracking-id from $(crds_count "$ann"), instance label from $(crds_count "$lab")"
+    # Deliberately an observation, not a promise: the documented crds -> argocd -> crds order means the argocd release
+    # is itself what creates a terminating CRD, so "none" here can still be followed by a wait after the confirm.
+    if [ -n "$dying" ]; then echo "  wait:   $(crds_count "$dying") terminating, the apply waits up to $CRDS_WAIT_TIMEOUT: $(echo $dying)"
+    else echo "  wait:   none terminating right now — re-checked after you confirm, a wait may still follow"; fi
+    echo "  keep:   chart labels an earlier installer set are NOT removed (the bundle never declares them)"
+}
+
+# The mutating pre-apply sequence, and the ONLY producer of the token crds_do_apply demands. Guard output is forced to
+# stderr because both guards report through `gum style` on stdout, and stdout here is captured into the token — without
+# the redirect their messages corrupt it. Arity coupling cannot detect a gutted body: tests/captain_utils/crds-terminating.sh
+# covers that directly, which is why this function is three lines long.
+crds_clearance() {   # $1 = live json re-read AFTER the confirm; prints a token bound to that exact file
+    crds_strip_argo_tracking "$1" >&2 || return 1
+    crds_wait_terminating "$1" >&2 || return 1
+    echo "cleared:$1"
+}
+
+# The only `kubectl apply` in this file, and it cannot run without a clearance for the SAME live file. ${3:?} fires when
+# the argument is missing (a deleted guard call), and the equality check rejects a stale or corrupted token — including
+# the print-then-fail case, where a guard emits its token and only then returns non-zero.
+# NOTE the caller must use `local c` and `c=$(crds_clearance ...)` on SEPARATE statements: `local c=$(...)` discards the
+# guard's exit status, because `local` is itself a command that returns 0.
+crds_do_apply() {   # $1 = bundle file, $2 = live json, $3 = token from crds_clearance "$2"
+    local file=$1 live=$2 token=${3:?BUG: crds_do_apply called without a clearance token}
+    [ "$token" = "cleared:$live" ] || { gum style --foreground 196 "❌ BUG: clearance token [$token] was not issued for $live" >&2; return 1; }
+    echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
+    kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3
+}
+
 crds_summary() {   # $1 = diff output — one aggregate line: a CRD that does not exist yet diffs from an empty file (single "@@ -0,0" hunk)
     local new chg
     new=$(grep -c '^@@ -0,0 ' <<<"$1" || true)
@@ -220,15 +301,15 @@ crds_apply_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/); r
 }
 crds_dir_git_info() {   # $1 = dir; "branch@sha[, dirty]" when inside a git checkout, empty otherwise (operator GIT_DIR ignored)
     local dir="$1" branch sha dirty=""
-    g() { env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir" "$@"; }
-    g rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-    sha=$(g rev-parse --short HEAD 2>/dev/null) || return 0
-    branch=$(g rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
-    [ -z "$(g status --porcelain -- . 2>/dev/null)" ] || dirty=", dirty"
+    local -a g=(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$dir")   # an array, not a nested function (custom.sh rule 4)
+    "${g[@]}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    sha=$("${g[@]}" rev-parse --short HEAD 2>/dev/null) || return 0
+    branch=$("${g[@]}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)
+    [ -z "$("${g[@]}" status --porcelain -- . 2>/dev/null)" ] || dirty=", dirty"
     printf '%s@%s%s' "$branch" "$sha" "$dirty"
 }
 crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
-    local v=$1 wd=$2 file difftxt rc=0 total unowned
+    local v=$1 wd=$2 file difftxt rc=0 total clearance
     file=$(crds_fetch "$v" "$wd") || return 1
     [ -d "$CRDS_CHART" ] || gum style --foreground 245 "bundle source: $CRDS_CHART --version ${v#v}"   # any override shows in the transcript
     total=$(crds_names "$file" | wc -l)
@@ -236,8 +317,8 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     crds_storedversions_check "$file" "$wd/live.json" || return 1   # on the pre-diff snapshot on purpose: it gates the diff the operator is shown
     if difftxt=$(kubectl diff --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" 2>&1); then rc=0; else rc=$?; fi
     if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 1; fi
+    crds_plan "$v" "$wd" "$wd/live.json" "$difftxt" "$rc" "$total" || return 1
     if [ "$rc" -eq 1 ]; then
-        gum style --bold --foreground 212 "CRD changes for platform-crds $v ($(crds_scope "$wd" "$total")):"; crds_summary "$difftxt"
         if [ -t 1 ]; then echo "$difftxt" | gum pager; else echo "$difftxt"; fi
         if [ "${CRDS_AUTO_CONFIRM:-}" != "yes" ]; then
             if ! gum confirm "Apply platform-crds $v?"; then
@@ -245,8 +326,6 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
                 gum style --foreground 212 "Skipped platform-crds $v"; return 0
             fi
         fi
-    else
-        gum style --foreground 212 "No CRD content changes for platform-crds $v ($(crds_scope "$wd" "$total")) — applying to record ownership"
     fi
     # apply creates what is missing and moves field ownership onto our manager. It deliberately does NOT remove anything
     # a previous installer left on these CRDs and the bundle does not itself set — chart labels, and also a
@@ -261,35 +340,88 @@ crds_apply_in() {   # $1 = version (or "local" for apply-dir), $2 = work dir
     # live.json was captured before the diff, the pager and the confirm — an unbounded human gap. Re-read it here so
     # the terminating check sees the cluster as it is NOW, not as it was when the operator started reading.
     crds_live_json "$file" "$wd/live-pre.json" || { gum style --foreground 196 "❌ cannot re-read CRDs after the confirm — nothing was applied" >&2; return 1; }
-    crds_strip_argo_tracking "$wd/live-pre.json" || return 1
-    crds_wait_terminating "$wd/live-pre.json" || return 1
-    echo "kubectl apply --server-side --force-conflicts --field-manager=$CRDS_FIELD_MANAGER -f $file"
-    if ! kubectl apply --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" | tail -3; then
+    # `local clearance` is declared at the top of the function ON PURPOSE: `local c=$(...)` would swallow the guards'
+    # exit status, because `local` is a command in its own right and returns 0.
+    clearance=$(crds_clearance "$wd/live-pre.json") || return 1
+    if ! crds_do_apply "$file" "$wd/live-pre.json" "$clearance"; then
         gum style --foreground 196 "❌ CRD apply failed"; return 1
     fi
     # shellcheck disable=SC2046   # crds_names output is intentionally word-split into one crd per argument
-    if ! kubectl wait --for=condition=Established crd $(crds_names "$file" | xargs) --timeout=120s > /dev/null; then
+    if ! kubectl wait --for=condition=Established crd $(crds_names "$file" | xargs) --timeout="$CRDS_WAIT_TIMEOUT" > /dev/null; then
         gum style --foreground 196 "❌ some CRDs did not become Established"; return 1
     fi
-    local names_json n
-    names_json=$(crds_names "$file" | jq -R . | jq -sc .) || return 1
-    kubectl get crd --show-managed-fields -o json \
-        | jq -c --argjson names "$names_json" '[.items[] | select(.metadata.name as $n | $names | index($n))]' > "$wd/live-owned.json" \
-        || { gum style --foreground 196 "❌ ownership check failed"; return 1; }
-    n=$(jq length "$wd/live-owned.json") || return 1
+    # No managedFields read here any more: after a successful apply with --field-manager, ownership of what we applied
+    # is what server-side apply just did, so asserting it restated the mechanism. `crds check` reports coverage instead,
+    # where it is diagnostic rather than tautological. The existence count below is a DIFFERENT claim and is kept.
+    local n dying
+    crds_live_json "$file" "$wd/live-post.json" || return 1
+    n=$(jq length "$wd/live-post.json") || return 1
     if [ "$n" -ne "$total" ]; then gum style --foreground 196 "❌ expected $total bundle CRDs live after apply, found $n"; return 1; fi
-    unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live-owned.json") || return 1
-    if [ -n "$unowned" ]; then gum style --foreground 196 "❌ not owned by $CRDS_FIELD_MANAGER after apply: $(echo $unowned)"; return 1; fi
     # Established stays True on a CRD that is being deleted, so the wait above cannot see this
-    local dying; dying=$(jq -r '.[] | select(.metadata.deletionTimestamp) | .metadata.name' "$wd/live-owned.json") || return 1
+    dying=$(crds_terminating "$wd/live-post.json") || return 1
     if [ -n "$dying" ]; then gum style --foreground 196 "❌ the bundle WAS applied, but still terminating (the type is unusable until it clears): $(echo $dying)"; return 1; fi
-    gum style --foreground 212 "✅ $total CRDs Established and owned by $CRDS_FIELD_MANAGER at platform-crds $v"
+    gum style --foreground 212 "✅ $total CRDs Established at platform-crds $v (applied as $CRDS_FIELD_MANAGER)"
 }
 
-usage() { echo "usage: captain_utils/crds target-version | apply <version> | apply-dir <dir>   (see the header of this file)"; }
+# The version this cluster declares. Read directly rather than through crds_target_version, which in dev shells out to
+# `gh release list` and an interactive chooser — neither belongs in a non-interactive check.
+crds_pinned_version() { yq '.versions[] | select(.name == "platform_crds_version") | .version' VERSIONS/glueops.yaml; }
+
+# `check`: the apply's read-only preflight, stopped before every mutation. It never calls crds_clearance or
+# crds_do_apply, so it cannot change the cluster (kubectl diff runs the apply as a server-side dry run and persists
+# nothing). Exit 1 is reserved for the diff's own drift; every other failure is 2, matching kubectl diff's convention.
+crds_check() {   # $1 = version
+    local wd rc=0
+    crds_valid_version "$1" || return 2
+    if [ -d "$CRDS_CHART" ]; then gum style --foreground 196 "❌ CRDS_CHART points at a directory [$CRDS_CHART] — check reads a released bundle, use check-dir" >&2; return 2; fi
+    wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 2
+    CRDS_WD=$wd
+    crds_check_in "$1" "$wd" || rc=$?
+    crds_cleanup
+    return "$rc"
+}
+# The read-only half of apply-dir. Symmetric with it for the same reason apply-dir exists — a local checkout is how a
+# change is tried before release — and it is what lets the cluster test exercise `check` without a registry.
+crds_check_dir() {   # $1 = local platform-crds checkout (Chart.yaml + crds/)
+    local dir=$1 wd rc=0 name
+    if [ -z "$dir" ] || [ ! -d "$dir" ]; then gum style --foreground 196 "❌ [$dir] is not a directory"; return 2; fi
+    if [ ! -f "$dir/Chart.yaml" ]; then gum style --foreground 196 "❌ [$dir] is not a rendered platform-crds checkout (needs Chart.yaml)"; return 2; fi
+    name=$(yq '.name' "$dir/Chart.yaml")
+    if [ "$name" != platform-crds ]; then gum style --foreground 196 "❌ [$dir/Chart.yaml] is chart [$name], not platform-crds"; return 2; fi
+    wd=$(mktemp -d "${TMPDIR:-/tmp}/platform-crds.XXXXXX") || return 2
+    CRDS_WD=$wd
+    CRDS_CHART="$dir" crds_check_in local "$wd" || rc=$?
+    crds_cleanup
+    return "$rc"
+}
+crds_check_in() {   # $1 = version, $2 = work dir
+    local v=$1 wd=$2 file difftxt rc=0 total unowned
+    file=$(crds_fetch "$v" "$wd") || return 2
+    total=$(crds_names "$file" | wc -l)
+    crds_live_json "$file" "$wd/live.json" owners || return 2   # owners: field-manager coverage is one of the four signals
+    crds_storedversions_check "$file" "$wd/live.json" || return 2
+    if difftxt=$(kubectl diff --server-side --force-conflicts --field-manager="$CRDS_FIELD_MANAGER" -f "$file" 2>&1); then rc=0; else rc=$?; fi
+    if [ "$rc" -gt 1 ]; then echo "$difftxt" | tail -20; gum style --foreground 196 "❌ kubectl diff failed"; return 2; fi
+    crds_plan "$v" "$wd" "$wd/live.json" "$difftxt" "$rc" "$total" || return 2
+    unowned=$(jq -r --arg m "$CRDS_FIELD_MANAGER" '.[] | select([.metadata.managedFields[]? | select(.manager==$m and .operation=="Apply")] | length == 0) | .metadata.name' "$wd/live.json") || return 2
+    if [ -n "$unowned" ]; then echo "  own:    $(crds_count "$unowned") not yet owned by $CRDS_FIELD_MANAGER: $(echo $unowned)"
+    else echo "  own:    all $total owned by $CRDS_FIELD_MANAGER"; fi
+    if [ "$rc" -eq 1 ]; then gum style --foreground 214 "drift: this cluster does not match platform-crds $v"; return 1; fi
+    gum style --foreground 212 "✅ in sync with platform-crds $v"
+}
+
+usage() { echo "usage: captain_utils/crds target-version | check [version] | check-dir <dir> | apply <version> | apply-dir <dir>   (see the header of this file)"; }
 
 case "${1:-}" in
     target-version) crds_target_version ;;
+    check)
+        checkv=${2:-}
+        if [ -z "$checkv" ]; then
+            checkv=$(crds_pinned_version) \
+                || { gum style --foreground 196 "❌ cannot read platform_crds_version from VERSIONS/glueops.yaml — run from the captain repo root, or pass a version" >&2; exit 2; }
+        fi
+        crds_check "$checkv" ;;
+    check-dir)      crds_check_dir "${2:-}" ;;
     apply)          crds_apply "${2:-}" ;;
     apply-dir)      crds_apply_dir "${2:-}" ;;
     -h|--help)      usage ;;
