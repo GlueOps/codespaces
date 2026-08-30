@@ -70,6 +70,40 @@ The command lives at `.devcontainer/libexec/captain_utils/crds`, installed to `/
 and deliberately off the PATH; its file header carries the full usage and the contract it is held to. Tests:
 `hack/test.sh` (offline, seconds) and `CRDS_TEST_KIND=1 hack/test.sh` for the cluster test.
 
+## VM metrics: node exporter → OpenTelemetry Collector
+
+Every CDE VM built from this image carries [`prometheus-node-exporter`](https://packages.debian.org/trixie/prometheus-node-exporter)
+(Debian package, loopback-only on `127.0.0.1:9100`) and the [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector-releases)
+(`otelcol-contrib`), which scrapes it, reads per-container stats from the Docker socket, and ships everything as
+OTLP/HTTP. Steady-state cost is ~22 MB for the exporter and ~190 MB / well under 1% of a core for the collector.
+
+**The image ships it inert.** `otelcol-contrib.service` has `ConditionPathExists=/etc/glueops/otel.env` and starts
+only when that file exists; a VM without it — anything created before the Slack bot wrote one, or a hand-made VM —
+leaves the unit inactive, not failed. Nothing per-VM is baked in: the endpoint and the VM's identity both come from
+the file, which is written by [slackbot-developer-workspaces](https://github.com/GlueOps/slackbot-developer-workspaces)
+through cloud-init, the same way it writes `cde_token` and `tunnel_endpoint`.
+
+`/etc/glueops/otel.env` is a systemd `EnvironmentFile` (root-only is fine — PID 1 reads it) and must contain:
+
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-http-cde.observability.glueopshosted.com
+OTEL_RESOURCE_ATTRIBUTES=cloud.region=<region>,host.type=<instance type>,host.image.name=<image tag>,deployment.environment.name=<prod|nonprod>,glueops.cde.owner=<email>
+```
+
+The endpoint is the base URL (`/v1/metrics` is appended by the exporter). `host.name` is not needed — the collector
+takes it from the hostname, which cloud-init sets to the server name — and it doubles as `service.instance.id`, so
+node-exporter dashboards that key on `instance` see the VM name. Values in `OTEL_RESOURCE_ATTRIBUTES` may not
+contain `,` or `=`. To turn reporting off on one VM, delete the file and `systemctl stop otelcol-contrib`; to point
+one elsewhere, edit it and `systemctl restart otelcol-contrib`.
+
+Files live in `vm/`: `observability.sh` (the Packer step), `otelcol/config.yaml`, `otelcol/glueops.conf` (the
+drop-in), `node-exporter/prometheus-node-exporter.default`. `hack/test-vm.sh` runs the offline checks and validates
+the config against the pinned collector when one is available (CI downloads it); the installer's own smoke test in
+the Packer build VM proves the units start, both receivers produce data, and the gate holds without the file.
+Debugging on a VM: `systemctl status otelcol-contrib`, `journalctl -u otelcol-contrib`, and the collector's own
+metrics at `curl 127.0.0.1:8888/metrics` (`otelcol_exporter_send_failed_metric_points` is the one to look at
+when nothing arrives).
+
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces

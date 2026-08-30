@@ -1,0 +1,86 @@
+# OpenTelemetry Collector config for a CDE VM. Installed to /etc/otelcol-contrib/config.yaml by vm/observability.sh.
+#
+# Scrapes the local node exporter and the Docker daemon, stamps the VM's identity on the data, and ships it as
+# OTLP/HTTP to the GlueOps observability endpoint. Nothing here is per-VM: every value that differs between VMs
+# (the endpoint and the OTEL_RESOURCE_ATTRIBUTES identity) arrives through /etc/glueops/otel.env — see the
+# "VM metrics" section of the README for that file's contract. The service does not start without it.
+#
+# Validate offline: OTEL_EXPORTER_OTLP_ENDPOINT=https://example.invalid otelcol-contrib validate --config vm/otelcol/config.yaml
+
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: node
+          scrape_interval: 30s
+          static_configs:
+            - targets: ["127.0.0.1:9100"]
+
+  # Per-container CPU / memory / block I/O / network for everything on the host daemon: the codespace container and
+  # whatever the developer runs beside it (kind/k3d nodes show up here too).
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    # The receiver's default API version is rejected outright by current Docker ("client version 1.25 is too old").
+    # A version below the daemon's minimum makes the receiver fail to start, which takes the whole collector down
+    # with it; the build-time smoke test in vm/observability.sh catches that before an image ships.
+    api_version: "1.44"
+    collection_interval: 30s
+    timeout: 20s
+
+processors:
+  # Backstop for an unreachable endpoint: without it the retry queue grows without bound. Sized for a fleet agent,
+  # not a gateway — steady state measured at ~190 MB RSS with both receivers, so 256 MiB is a ceiling, not a target.
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  # env: reads OTEL_RESOURCE_ATTRIBUTES (cloud.region, host.type, owner, ... — written by the Slack bot).
+  # system: host.name from the VM hostname, which cloud-init sets to the server name.
+  resourcedetection:
+    detectors: [env, system]
+    system:
+      hostname_sources: [os]
+
+  # Backends that ingest OTLP into a Prometheus-style store map service.name -> job and service.instance.id ->
+  # instance. The prometheus receiver would otherwise set instance to "127.0.0.1:9100" on every VM, which breaks
+  # every node-exporter dashboard that keys on it. Point it at the hostname instead, and give the docker_stats
+  # resources (which carry no service.name) a job of their own.
+  resource:
+    attributes:
+      - key: service.instance.id
+        from_attribute: host.name
+        action: upsert
+      - key: service.name
+        value: docker_stats
+        action: insert
+
+  batch:
+    timeout: 10s
+
+exporters:
+  otlphttp:
+    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+    # 50 batches at one scrape per 30s is ~25 minutes of buffering; older data is dropped rather than kept forever.
+    sending_queue:
+      enabled: true
+      queue_size: 50
+
+service:
+  telemetry:
+    metrics:
+      level: basic
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    metrics:
+      receivers: [prometheus, docker_stats]
+      processors: [memory_limiter, resourcedetection, resource, batch]
+      exporters: [otlphttp]
