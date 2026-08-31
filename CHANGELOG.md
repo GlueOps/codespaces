@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.161.0](https://github.com/GlueOps/codespaces/compare/v0.160.0...v0.161.0) (2026-08-31)
+
+
+### Features
+
+* **gluekube-ssh:** containerized ansible shell across cluster nodes ([#582](https://github.com/GlueOps/codespaces/issues/582)) ([8db4218](https://github.com/GlueOps/codespaces/commit/8db4218237265f559e5e8523441265fdaca65aef))
+
 ## [0.160.0](https://github.com/GlueOps/codespaces/compare/v0.159.1...v0.160.0) (2026-08-28)
 
 
