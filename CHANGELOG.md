@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.161.1](https://github.com/GlueOps/codespaces/compare/v0.161.0...v0.161.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* **gluekube-ssh:** one shared bastion connection per run, and a banner people can actually use ([#584](https://github.com/GlueOps/codespaces/issues/584)) ([b65b276](https://github.com/GlueOps/codespaces/commit/b65b276b62a819b0e5480d2f6aae0be174d27598))
+* **gluekube-ssh:** reach nodes through the bastion without agent forwarding ([#586](https://github.com/GlueOps/codespaces/issues/586)) ([925b28f](https://github.com/GlueOps/codespaces/commit/925b28fe9b6181734987730d273fe94e736bb105))
+
 ## [0.161.0](https://github.com/GlueOps/codespaces/compare/v0.160.0...v0.161.0) (2026-08-31)
 
 
