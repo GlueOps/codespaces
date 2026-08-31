@@ -19,15 +19,27 @@ API_ENDPOINT="https://stub.invalid/api/v1"
 API_KEY="stub"
 export GLUEKUBE_SSH_LIBEXEC="$PWD/.devcontainer/libexec/gluekube_ssh"
 
-DOCKERLOG=$(mktemp); OUT=$(mktemp)
-cleanup() { rm -f "$DOCKERLOG" "$OUT"; }
+DOCKERLOG=$(mktemp); OUT=$(mktemp); INVOUT=$(mktemp); CFGOUT=$(mktemp)
+cleanup() { rm -f "$DOCKERLOG" "$OUT" "$INVOUT" "$CFGOUT"; }
 trap cleanup EXIT
 
 gum() { echo "${@: -1}"; }
 # Log the FULL argv (not just $1) so the generated inventory - passed as
 # -e GLUEKUBE_INVENTORY_YML=<json> - can be asserted offline; the only other
 # coverage of inventory content lives in the skippable docker integration test.
-docker() { printf '%s\n' "docker $*" >> "$DOCKERLOG"; }
+docker() {
+    printf '%s\n' "docker $*" >> "$DOCKERLOG"
+    # Also stash the generated inventory on its own so assertions can use jq
+    # instead of grepping a multi-line argv blob.
+    # Same for the generated ssh config: asserting on the whole argv would also
+    # match the bootstrap's own SOURCE (passed as an env var), whose comments
+    # mention ControlMaster - a false match that hides a real regression.
+    local a; for a in "$@"; do
+        [[ "$a" == GLUEKUBE_INVENTORY_YML=* ]] && printf '%s' "${a#GLUEKUBE_INVENTORY_YML=}" > "$INVOUT"
+        [[ "$a" == GLUEKUBE_SSH_CONFIG=* ]] && printf '%s' "${a#GLUEKUBE_SSH_CONFIG=}" > "$CFGOUT"
+    done
+    return 0  # the loop's last test is usually false; don't leak that as a docker failure
+}
 
 good_cluster() { # <bastion public_ip_address>
     printf '{"bastion_server":{"hostname":"bastion","public_ip_address":"%s","ssh_key_id":"k1"},"node_pools":[{"servers":[{"role":"master","hostname":"master-1","status":"ready","private_ip_address":"10.0.0.11","ssh_key_id":"k2"}]}]}' "$1"
@@ -83,6 +95,14 @@ ansible_shell_mode "$inj_cluster" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
 check_eq "succeeds (rc=0)" "$?" "0"
 check "masters group present" '"masters"' "$DOCKERLOG"
 check "ProxyJump through the bastion set" "ProxyJump=cluster@203.0.113.10" "$DOCKERLOG"
+# The bastion's OWN connection must be pinned to the shared control socket, or
+# ansible's own -o ControlPath wins and it opens a fresh TCP connection every
+# run - the one that gets refused by a per-source SSH rate limit.
+check_eq "bastion group pinned to the shared control socket" \
+    "$(jq -r '.all.children.bastions.vars.ansible_ssh_common_args // ""' "$INVOUT" | grep -c 'ControlPath=~/.ssh/cm-%C')" "1"
+check_eq "node group keeps ProxyJump AND the shared socket" \
+    "$(jq -r '.all.children.masters.vars.ansible_ssh_common_args // ""' "$INVOUT" | grep -c 'ProxyJump=cluster@203.0.113.10 -o ControlPath=~/.ssh/cm-%C')" "1"
+check "bastion host passed to the bootstrap for pre-warming" "[-]e GLUEKUBE_BASTION_HOST" "$DOCKERLOG"
 check "real bastion survives as a host" "real-bastion" "$DOCKERLOG"
 check_absent "injection IP dropped from inventory" "lookup" "$DOCKERLOG"
 check "role-bastion node kept in its own group" '"bastion_nodes"' "$DOCKERLOG"
@@ -106,6 +126,21 @@ check "case-variant worker kept (roles merged)" "w-upper" "$DOCKERLOG"
 check "lower-case worker kept" "w-lower" "$DOCKERLOG"
 check_absent "non-string IP server dropped" "numeric-ip" "$DOCKERLOG"
 check_absent "trailing-newline IP server dropped" "trailing-nl" "$DOCKERLOG"
+
+
+##### G6 GLUEKUBE_SSH_NO_MUX=1 disables every user of the shared socket #####
+echo "##### G6 kill switch turns multiplexing off everywhere #####"
+: > "$DOCKERLOG"; : > "$INVOUT"; : > "$CFGOUT"
+GLUEKUBE_SSH_NO_MUX=1 ansible_shell_mode "$(good_cluster "203.0.113.10")" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
+check_eq "still succeeds (rc=0)" "$?" "0"
+check "warns that multiplexing is off" "multiplexing disabled" "$OUT"
+check_eq "no ControlPath in the bastion group" \
+    "$(jq -r '.all.children.bastions.vars.ansible_ssh_common_args // ""' "$INVOUT" | grep -c 'ControlPath')" "0"
+check_absent "no ControlMaster block in ssh_config" "ControlMaster" "$CFGOUT"
+# Empty bastion host is how the bootstrap is told to skip the pre-warm.
+check "pre-warm disabled via empty bastion host" "GLUEKUBE_BASTION_HOST= " "$DOCKERLOG"
+# Nodes still need the jump: the switch must not strand them.
+check "nodes keep their ProxyJump" "ProxyJump=cluster@203.0.113.10" "$DOCKERLOG"
 
 echo "ansible-guards.sh: $((pass + fail)) assertions, FAILS=$fail"
 exit $(( fail > 0 ? 1 : 0 ))

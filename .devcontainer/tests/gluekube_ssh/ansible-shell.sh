@@ -8,15 +8,17 @@ set -u -o pipefail
 cd "$(dirname "$0")/../../.." || exit 1
 for c in docker jq python3; do command -v "$c" >/dev/null || { echo "ansible-shell.sh: $c is required" >&2; exit 1; }; done
 
-PORT=18923
 OUT=$(mktemp)
 MOCK_LOG=$(mktemp)
 cleanup() { [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null; rm -f "$OUT" "$MOCK_LOG"; }
 trap cleanup EXIT
 
 # --- mock AutoGlue API: the bootstrap only calls /ssh/{id}?reveal=true ---
-python3 - "$PORT" >"$MOCK_LOG" 2>&1 <<'PYEOF' &
-import json, re, sys
+# Binds an EPHEMERAL port and announces it, rather than a fixed one: two runs of
+# this harness on one host would otherwise fight over the port and corrupt each
+# other's results (observed - it looks like an auth-header failure, not a clash).
+python3 - >"$MOCK_LOG" 2>&1 <<'PYEOF' &
+import json, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -26,10 +28,26 @@ class H(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(body.encode())
     def log_message(self, *a): pass
-HTTPServer(("0.0.0.0", int(sys.argv[1])), H).serve_forever()
+srv = HTTPServer(("0.0.0.0", 0), H)
+print("PORT=%d" % srv.server_address[1], flush=True)
+srv.serve_forever()
 PYEOF
 MOCK_PID=$!
-sleep 1
+
+# Wait for the mock to actually bind and announce its port instead of sleeping
+# blind: a dead mock otherwise surfaces later as unrelated assertion failures.
+PORT=""
+for _ in $(seq 1 100); do
+    PORT=$(sed -n 's/^PORT=//p' "$MOCK_LOG" | head -1)
+    [[ -n "$PORT" ]] && break
+    kill -0 "$MOCK_PID" 2>/dev/null || break
+    sleep 0.1
+done
+if [[ -z "$PORT" ]]; then
+    echo "  FAIL: mock API never bound a port" >&2
+    cat "$MOCK_LOG" >&2
+    exit 1
+fi
 
 # The container runs on the host docker daemon; it reaches the mock via the bridge gateway.
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)
@@ -61,7 +79,10 @@ stat -c '%a %n' ~/.ssh/gluekube_* && cat ~/.ssh/gluekube_0
 df ~/.ssh | tail -1
 env | grep -q '^AUTOGLUE_API_KEY=' || echo "api key scrubbed"
 pwd
-bash -ic 'echo "PS1=$PS1"; type -t raw; type -t inv' 2>/dev/null
+# Tag each helper with its own name: a bare `type -t` prints "function" for
+# three of them, so an untagged assertion passes even when its helper is gone.
+bash -ic 'echo "PS1=$PS1"; for h in raw inv pycheck gkhelp; do echo "helper:$h=$(type -t "$h")"; done' 2>/dev/null
+bash -ic 'gkhelp' 2>/dev/null | grep -c "Explore (read-only):" | sed 's/^/gkhelp-sections=/'
 CMDS
 
 pass=0; fail=0
@@ -93,8 +114,25 @@ else
     check "no /work mount outside /workspaces" '^/home/ansible$'
 fi
 check "PS1 carries the cluster name"   'PS1=.*nonprod\.test\.onglueops\.com'
-check "raw helper is a function"       '^function$'
-check "inv helper is an alias"         '^alias$'
+check "raw helper is a function"       '^helper:raw=function$'
+check "inv helper is an alias"         '^helper:inv=alias$'
+check "pycheck helper is a function"   '^helper:pycheck=function$'
+check "gkhelp helper is a function"    '^helper:gkhelp=function$'
+check "gkhelp reprints the banner"     'gkhelp-sections=1'
+# The pre-warm targets a TEST-NET bastion here, so its failure path runs on
+# every container test - assert it degrades with a note instead of dying.
+check "prewarm failure is noted"       'could not pre-open the shared bastion connection'
+# Banner contract: discovery examples for people new to ansible, and NO blanket
+# "nodes have no python3" claim (it is not true of every cluster). The python
+# constraint stays only as a conditional troubleshooting note.
+check "banner shows the inventory tree cmd"  'ansible-inventory --graph'
+check "banner shows the full-inventory cmd"  'ansible-inventory --list'
+check "banner shows a --list-hosts example"  'list-hosts'
+check "python note is conditional"           'has no python3 - use raw or'
+check_absent "no blanket no-python3 claim"   'Nodes have no python3'
+# Shortcuts must NOT be advertised here: this harness pipes stdin, so ~/.bashrc
+# is never read and the helpers genuinely do not exist in that shell.
+check_absent "shortcuts hidden when piped"   '^Shortcuts:'
 check_absent "no key-fetch warnings"   'WARNING: could not fetch'
 check_absent "no group/host name clash" 'Found both group and host'
 
@@ -110,4 +148,10 @@ else
 fi
 
 echo "$((pass + fail)) assertions, $fail failures"
-[[ $fail -eq 0 ]] || { echo "--- container output ---"; cat "$OUT"; exit 1; }
+[[ $fail -eq 0 ]] || {
+    echo "--- container output ---"; cat "$OUT"
+    # The mock log is the first thing to check on a failure: if it never saw the
+    # requests, the fault is the harness/mock, not the tool under test.
+    echo "--- mock API log (port $PORT) ---"; cat "$MOCK_LOG"
+    exit 1
+}

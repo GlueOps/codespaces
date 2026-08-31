@@ -1166,19 +1166,63 @@ ansible_shell_mode() {
     #    "{{ lookup(...) }}" would otherwise execute on the controller). A
     #    server whose usable IP is missing or malformed is dropped from the
     #    inventory rather than admitted with a broken/hostile ansible_host.
+    #    (The bastion's own ansible_host skips this check because it IS
+    #    bastion_ip, already validated by the guard above.)
     #  - The synthetic bastions group is merged LAST so a node-pool server
     #    whose role is itself "bastion" (spec-permitted) can never overwrite
     #    the real bastion and hide it from `ansible all`.
-    # \z (not $) so a trailing newline can't sneak past; the type check keeps a
-    # non-string IP from making test() throw and killing the WHOLE inventory
-    # build when the intent is to drop just that one server.
+    #  - The regex is anchored with \z, not $, so a trailing newline cannot
+    #    sneak past, and the type check keeps a non-string IP from making
+    #    test() throw and killing the WHOLE inventory build when the intent
+    #    is to drop just that one server.
     local addr_re='^[A-Za-z0-9.:_-]+\z'
     # An IPv6 literal must be bracketed in a ProxyJump spec or ssh rejects it.
     local jump_host="$bastion_ip"
     [[ "$bastion_ip" == *:* ]] && jump_host="[$bastion_ip]"
+
+    # The bastion's OWN connection must be pinned to the same shared control
+    # socket as everything else. Left alone, ansible generates its own
+    # -o ControlPath=~/.ansible/cp/..., so the bastion becomes the one host that
+    # cannot join the multiplexed connection and opens a brand-new TCP session
+    # on every single run - the exact connection refused by a bastion that rate
+    # limits SSH per source (e.g. `ufw limit ssh`: 5 new connections per 30s).
+    # Supplying a ControlPath here stops that: ansible detects a user-supplied
+    # ControlPath in the connection args and omits its own entirely, so ours is
+    # the only one on the command line (verified with `ansible -vvv`).
+    # ControlPersist is deliberately NOT set here - ansible's own ssh_args
+    # already carry `-o ControlPersist=60s` ahead of these, and ssh takes the
+    # first value for a keyword, so anything set here would never apply. The
+    # master's real lifetime comes from the Host block in ssh_config below,
+    # which is what the pre-warm and the ProxyJump hops use.
+    #
+    # CONTRACT: %C hashes (local host, remote host, port, remote user), so all
+    # THREE users of this socket must dial the bastion by the SAME string -
+    # the ProxyJump spec below, the `Host` block in ssh_config, and the
+    # pre-warm's target (GLUEKUBE_BASTION_HOST). Change one to a hostname
+    # while another uses the IP and the hashes diverge: sharing silently
+    # reverts to a connection per fork, with no error and no failing test.
+    #
+    # shellcheck disable=SC2088  # the ~ must stay LITERAL: ssh expands it itself,
+    # and it has to resolve inside the container (/home/ansible), not out here.
+    local control_path='~/.ssh/cm-%C' control_persist='5m'
+    local mux_args="-o ControlPath=$control_path -o ControlMaster=auto"
+
+    # Escape hatch: if multiplexing ever misbehaves (a poisoned control socket
+    # fails every fork with the SAME "UNREACHABLE" this feature exists to fix,
+    # so it is not self-evident which one you are looking at), set
+    # GLUEKUBE_SSH_NO_MUX=1 to fall back to a connection per fork without
+    # needing a revert and a release.
+    # Empty prewarm_host tells the bootstrap to skip pre-warming, so the switch
+    # turns off all three users of the socket, not just the inventory args.
+    local no_mux="${GLUEKUBE_SSH_NO_MUX:-0}" prewarm_host="$bastion_ip"
+    if [[ "$no_mux" == "1" ]]; then
+        mux_args=""
+        prewarm_host=""
+        gum style --foreground 208 "⚠️  GLUEKUBE_SSH_NO_MUX=1 - SSH multiplexing disabled; each fork dials the bastion separately"
+    fi
     local inventory
     inventory=$(echo "$cluster" | jq \
-        --arg jump "-o ProxyJump=cluster@$jump_host" --arg addr_re "$addr_re" '
+        --arg jump "-o ProxyJump=cluster@$jump_host $mux_args" --arg mux "$mux_args" --arg addr_re "$addr_re" '
         def ip: if ((.private_ip_address // "N/A") != "N/A" and (.private_ip_address // "") != "")
                 then .private_ip_address else (.public_ip_address // "") end;
         def addr_ok: (type == "string") and test($addr_re);
@@ -1201,7 +1245,8 @@ ansible_shell_mode() {
                                 vars: {ansible_ssh_common_args: $jump}}})
                  | from_entries)
                 + {bastions: {hosts: {(.bastion_server.hostname // "bastion"):
-                    {ansible_host: .bastion_server.public_ip_address}}}}
+                    {ansible_host: .bastion_server.public_ip_address}},
+                    vars: {ansible_ssh_common_args: $mux}}}
             )
         }}')
 
@@ -1236,18 +1281,24 @@ ansible_shell_mode() {
     local bastion_key_first=0
     [[ -n "$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')" ]] && bastion_key_first=1
 
-    # SSH client config applied to both hops (bastion and node). The bastion
-    # hop is multiplexed: every ansible fork's ProxyJump otherwise opens its
-    # own unauthenticated connection to the bastion at the same instant, and
-    # sshd's MaxStartups (default 10:30:100) randomly drops the overflow -
-    # which shows up as a random subset of nodes being UNREACHABLE. With
-    # ControlMaster all forks share one authenticated bastion connection.
-    local ssh_config="Host $bastion_ip
+    # SSH client config applied to both hops (bastion and node). Every hop to
+    # the bastion - each fork's ProxyJump and the bastion's own connection -
+    # shares ONE multiplexed TCP connection via this control socket. Without it
+    # each fork dials the bastion separately, which both trips sshd's
+    # MaxStartups (random nodes UNREACHABLE) and burns through a per-source
+    # connection rate limit if the bastion has one (`ufw limit ssh` refuses the
+    # 6th new connection in 30s), leaving the bastion itself refused.
+    # bootstrap.py pre-warms this socket so the forks never race to create it.
+    local ssh_config=""
+    if [[ "$no_mux" != "1" ]]; then
+        ssh_config="Host $bastion_ip
   ControlMaster auto
-  ControlPath ~/.ssh/cm-%C
-  ControlPersist 5m
+  ControlPath $control_path
+  ControlPersist $control_persist
 
-Host *
+"
+    fi
+    ssh_config+="Host *
   User cluster
   StrictHostKeyChecking no
   UserKnownHostsFile /dev/null
@@ -1259,9 +1310,10 @@ Host *
         i=$((i + 1))
     done
 
-    # forks stays under the bastion's MaxStartups soft limit (10) for the very
-    # first burst, before the shared control master is established; retries
-    # absorb any transient drop that still slips through.
+    # With the control socket pre-warmed, forks no longer cost one bastion
+    # connection each (they all multiplex over the one that is already up), so
+    # this is now just a parallelism choice rather than a connection budget.
+    # retries absorb any transient drop that still slips through.
     local ansible_cfg="[defaults]
 inventory = /home/ansible/inventory.yml
 host_key_checking = False
@@ -1338,6 +1390,7 @@ retries = 3
         -e GLUEKUBE_CLUSTER_NAME="$cluster_name" \
         -e GLUEKUBE_SSH_KEY_IDS="$key_ids" \
         -e GLUEKUBE_BASTION_KEY_FIRST="$bastion_key_first" \
+        -e GLUEKUBE_BASTION_HOST="$prewarm_host" \
         -e GLUEKUBE_INVENTORY_YML="$inventory" \
         -e GLUEKUBE_SSH_CONFIG="$ssh_config" \
         -e GLUEKUBE_ANSIBLE_CFG="$ansible_cfg" \
@@ -1758,6 +1811,13 @@ OPTIONS:
                      directory is mounted at /work when it is under /workspaces.
   --org <name>       Limit cluster lookup to this org (optional; otherwise all orgs are scanned)
   -h, --help         Show this help
+
+ENVIRONMENT:
+  GLUEKUBE_SSH_NO_MUX=1   Disable SSH multiplexing for --ansible. Normally every
+                          hop shares ONE connection to the bastion (bastions that
+                          rate-limit SSH per source refuse a burst otherwise).
+                          Set this only if multiplexing itself misbehaves - each
+                          fork then dials the bastion separately, as it used to.
 
 EXAMPLES:
   gluekube_ssh --profile nonprod --cluster nonprod.foobar.onglueops.com --kubectl
