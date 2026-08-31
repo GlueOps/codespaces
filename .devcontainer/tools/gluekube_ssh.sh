@@ -1255,7 +1255,9 @@ retries = 3
         gum style --foreground 208 "⚠️  $PWD is not under /workspaces - /work will not be mounted"
     fi
 
-    echo "Starting Ansible shell for $cluster_name (image is pulled on first use)..."
+    # The VM golden image pre-warms this image (see developer-setup.sh), so the
+    # pull normally only happens on VMs built before the pre-warm existed.
+    echo "Starting Ansible shell for $cluster_name (image typically pre-warmed on the VM; pulled now only if missing)..."
 
     # Allocate a TTY only when we have one; without it, stdin still flows, so
     # commands can be piped in:  gluekube_ssh ... --ansible <<< "ansible all -m raw -a uptime"

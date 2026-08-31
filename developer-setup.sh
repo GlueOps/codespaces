@@ -464,6 +464,23 @@ if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
 else
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
+
+  # Pre-warm the Ansible shell image (used by gluekube_ssh --ansible) so the
+  # first use on a fresh VM doesn't pay a ~300MB pull. The digest-pinned
+  # reference lives in ONE place - the ANSIBLE_IMAGE= line of the gluekube_ssh
+  # tool inside the CDE image we just pulled - so extract it from there rather
+  # than duplicating the pin here. Best-effort on every path: an older CDE
+  # image without the pin, or a failed pull, just means gluekube_ssh pulls the
+  # image on first use like it already handles.
+  ANSIBLE_SHELL_IMAGE=$(sudo docker run --rm --entrypoint "" \
+      "ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG" \
+      sed -n 's/^ANSIBLE_IMAGE="\(.*\)"$/\1/p' /usr/local/bin/gluekube_ssh || true)
+  if [ -n "$ANSIBLE_SHELL_IMAGE" ]; then
+    echo "Pre-warming Ansible shell image: $ANSIBLE_SHELL_IMAGE"
+    sudo docker pull "$ANSIBLE_SHELL_IMAGE" || echo "WARNING: Ansible shell image pre-warm failed; it will be pulled on first use instead."
+  else
+    echo "No Ansible shell image pin found in this codespace tag (pre-ansible-shell release?); skipping pre-warm."
+  fi
 fi
 
 echo "disk usage after docker pull:"
