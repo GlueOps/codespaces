@@ -454,6 +454,107 @@ browse_infrastructure() {
     done
 }
 
+# Options shared by every ssh invocation in this tool. An array, not a string,
+# so nothing is re-split by the shell.
+#
+# The keepalives matter most for the port-forward, which the tool explicitly
+# tells you to leave running: without them a silently dropped TCP (a NAT idle
+# timeout, a bastion reboot) leaves a tunnel that still LOOKS alive, and kubectl
+# just hangs against it. 15s x 3 tears it down in ~45s instead.
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
+          -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+
+# Reach a cluster node THROUGH the bastion.
+#
+#   node_ssh <bastion_ip> <target_ip> [ssh opts...] [-- remote command...]
+#
+# ssh requires options BEFORE the destination and the remote command AFTER it,
+# so `--` separates the two groups; with no `--`, everything is ssh options.
+#
+# Every hop authenticates from the LOCAL ssh-agent (load_connection_keys put
+# both keys there), and nothing is forwarded to the bastion. That matters
+# because GlueOps bastions are hardened with `AllowAgentForwarding no`: the old
+# shape - `ssh -A bastion "ssh node"` - ran the second ssh ON the bastion and
+# needed the forwarded agent to authenticate it, so it now fails with
+# "Permission denied (publickey)". ProxyJump only needs AllowTcpForwarding,
+# which those bastions do allow. (This is the same mechanism ansible_shell_mode
+# already uses for its inventory.)
+#
+# Consequences worth knowing:
+#  - The bastion binds NOTHING; it only proxies stdio. A -L forward therefore
+#    binds locally only, which is why no bastion-side mid-port dance is needed.
+#  - Killing the local ssh tears the whole chain down, instead of potentially
+#    orphaning an inner ssh on the bastion.
+node_ssh() {
+    local bastion_ip="$1" target_ip="$2"
+    shift 2
+    # Both addresses come from the API. bastion_ip is interpolated into the
+    # ProxyCommand string, which a shell runs - so it MUST be guarded.
+    # target_ip only ever appears as an argv element, but ssh substitutes it for
+    # %h inside that same string, so it reaches a shell indirectly; today only
+    # OpenSSH's own hostname validation stops a hostile value, and relying on
+    # that would make us version-dependent. Guard both the same way.
+    # Errors go to STDERR: callers redirect this function's stdout straight into
+    # a file (the kubeconfig fetches do), so a message on stdout would land
+    # inside it.
+    local addr
+    for addr in "$bastion_ip" "$target_ip"; do
+        if [[ -z "$addr" || "$addr" == "N/A" ]]; then
+            gum style --foreground 196 "✗ This server has no usable address - cannot connect" >&2
+            return 1
+        fi
+        if [[ ! "$addr" =~ ^[A-Za-z0-9.:_-]+$ ]]; then
+            gum style --foreground 196 "✗ Address '$addr' contains unexpected characters - refusing" >&2
+            return 1
+        fi
+    done
+    local opts=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do opts+=("$1"); shift; done
+    [[ "${1:-}" == "--" ]] && shift
+
+    # Deliberately a ProxyCommand and NOT -o ProxyJump=. A ProxyJump child does
+    # NOT inherit the parent's command-line -o options, so the bastion hop would
+    # run with default host-key checking and fail with "Host key verification
+    # failed" against these throwaway cluster hosts (verified: ProxyJump works
+    # only when the options come from an ssh_config the child also reads, which
+    # is why ansible_shell_mode - which writes one - can use it and this cannot).
+    # A ProxyCommand lets us state the same options explicitly for the hop.
+    # SSH_OPTS holds fixed, space-free literals, so embedding it in the command
+    # string is safe; $bastion_ip is guarded above because this string IS run by
+    # a shell.
+    #
+    # IPv4 only in practice: AutoGlue returns IPv4 for both addresses today, and
+    # unlike ansible_shell_mode (which brackets its ProxyJump spec) this `-W
+    # %h:%p` form has never been exercised with an IPv6 literal. If IPv6 nodes
+    # ever appear, verify the -W spec parses before trusting it rather than
+    # assuming the bracket rules match.
+    ssh "${SSH_OPTS[@]}" \
+        -o "ProxyCommand=ssh ${SSH_OPTS[*]} -W %h:%p cluster@$bastion_ip" \
+        "${opts[@]}" "cluster@$target_ip" "$@"
+}
+
+# Stop a backgrounded port-forward started as `( node_ssh ... ) &`.
+#
+# $! there is the WRAPPER subshell, not ssh: bash only exec-optimizes a subshell
+# whose body is a single simple command, and node_ssh is a function. SIGTERM to
+# the wrapper does not HUP its child, so killing only $! orphans the ssh - which
+# keeps holding local 6443 while the UI reports the forward stopped. Killing the
+# children first fixes that, and is correct whichever process $! turns out to be.
+#
+# The ProxyCommand ssh is a GRANDCHILD and is deliberately not killed here: it
+# owns no local socket (the outer ssh holds the -L bind) and exits on EOF as
+# soon as its parent's stdio closes. Verified - the port is free the moment the
+# direct child dies.
+stop_port_forward() {
+    local pid="${1:-}" child
+    [[ -z "$pid" ]] && return 0
+    for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
+        kill "$child" 2>/dev/null || true
+    done
+    kill "$pid" 2>/dev/null || true
+    return 0
+}
+
 # Clear all SSH keys from agent (called when entering a new cluster)
 clear_ssh_keys() {
     # Check if ssh-agent is running (exit code 2 = not running, 0/1 = running)
@@ -558,7 +659,8 @@ ssh_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        # Add the bastion + target keys to the agent (adds only - the agent is
+        # cleared by clear_ssh_keys when entering a cluster, not here)
         load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Connect directly - after exit, returns to server list
@@ -621,7 +723,7 @@ kubectl_mode() {
         if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
             # Clean up port forward if running
             if [[ -n "$port_forward_pid" ]]; then
-                kill "$port_forward_pid" 2>/dev/null || true
+                stop_port_forward "$port_forward_pid"
             fi
             return
         fi
@@ -629,7 +731,7 @@ kubectl_mode() {
         # Handle stop port forward
         if [[ "$server_selection" == "🛑 Stop Port Forward" ]]; then
             if [[ -n "$port_forward_pid" ]]; then
-                kill "$port_forward_pid" 2>/dev/null || true
+                stop_port_forward "$port_forward_pid"
                 port_forward_pid=""
                 port_forward_master=""
                 gum style --foreground 82 "✓ Port forward stopped"
@@ -659,12 +761,13 @@ kubectl_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        # Add the bastion + target keys to the agent (adds only - the agent is
+        # cleared by clear_ssh_keys when entering a cluster, not here)
         load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Stop existing port forward if running
         if [[ -n "$port_forward_pid" ]]; then
-            kill "$port_forward_pid" 2>/dev/null || true
+            stop_port_forward "$port_forward_pid"
             port_forward_pid=""
             port_forward_master=""
         fi
@@ -690,19 +793,19 @@ kubectl_mode() {
             fi
         fi
         
-        # Start port forward in background. Route local:6443 -> bastion:<random>
-        # -> master:6443 so a stale forward on the bastion's 6443 can't block us.
-        local mid_port=$(( 20000 + (RANDOM % 20000) ))
-        echo "Starting port forward: localhost:6443 -> $hostname:6443 (via bastion:$mid_port)"
+        # Start port forward in background. The tunnel terminates ON the master
+        # and the bastion only proxies stdio, so the ONLY listening socket is
+        # local:6443 - no bastion-side bind, which is why the old random
+        # mid-port (there to dodge a stale bind on the bastion's 6443) is gone.
+        echo "Starting port forward: localhost:6443 -> $hostname:6443 (via $bastion_ip)"
 
         # Create a temporary error log
         local error_log
         error_log=$(mktemp)
 
         # Start port forward with error output captured - using proper backgrounding
-        (ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-            -L "6443:localhost:${mid_port}" -t cluster@"$bastion_ip" \
-            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes -N -L ${mid_port}:localhost:6443 cluster@$target_ip" \
+        (node_ssh "$bastion_ip" "$target_ip" \
+            -o ExitOnForwardFailure=yes -N -L "6443:localhost:6443" \
             2>"$error_log") &
         
         local ssh_pid=$!
@@ -738,7 +841,7 @@ kubectl_mode() {
             rm -f "$error_log"
             
             # Clean up the failed SSH process
-            kill "$ssh_pid" 2>/dev/null || true
+            stop_port_forward "$ssh_pid"
             
             port_forward_pid=""
             port_forward_master=""
@@ -802,15 +905,17 @@ kubeconfig_mode() {
     # Create ~/.kube directory if it doesn't exist
     mkdir -p ~/.kube
     
-    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    # Add the bastion + target keys to the agent (adds only - the agent is
+    # cleared by clear_ssh_keys when entering a cluster, not here)
     load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
     
     echo "Fetching kubeconfig from $hostname..."
     
-    # Copy the file through bastion using double-hop SCP with agent forwarding and private IP
-    if ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip \
-        'sudo cat /etc/kubernetes/admin.conf'" > ~/.kube/config 2>&1; then
+    # Read the file off the master through the bastion (no agent forwarding)
+    # No -t: a PTY would translate newlines and let MOTD/banner text into the
+    # captured kubeconfig. sudo needs no TTY here (it never had one on this hop).
+    if node_ssh "$bastion_ip" "$target_ip" -- \
+        sudo cat /etc/kubernetes/admin.conf > ~/.kube/config 2>/dev/null; then
         # Update the server URL to localhost:6443
         if kubectl config set-cluster "kubernetes" --server=https://127.0.0.1:6443 >/dev/null 2>&1; then
             echo "✓ Kubeconfig saved to ~/.kube/config"
@@ -863,7 +968,8 @@ kubeconfig_and_port_forward() {
     local bastion_key_id="$5"
     local target_key_id="$6"
 
-    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    # Add the bastion + target keys to the agent (adds only - the agent is
+    # cleared by clear_ssh_keys when entering a cluster, not here)
     load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
 
     # Free local port 6443. The fetched kubeconfig pins the API server to
@@ -906,9 +1012,9 @@ kubeconfig_and_port_forward() {
     kube_tmp=$(mktemp)
     echo "Fetching fresh kubeconfig from $hostname..."
 
-    if ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip \
-        'sudo cat /etc/kubernetes/admin.conf'" > "$kube_tmp" 2>/dev/null && [[ -s "$kube_tmp" ]]; then
+    # No -t: see kubeconfig_mode - a PTY would corrupt the captured file.
+    if node_ssh "$bastion_ip" "$target_ip" -- \
+        sudo cat /etc/kubernetes/admin.conf > "$kube_tmp" 2>/dev/null && [[ -s "$kube_tmp" ]]; then
         mv "$kube_tmp" ~/.kube/config
         # Point the kubeconfig at the local port-forward
         if kubectl config set-cluster "kubernetes" --server=https://127.0.0.1:6443 >/dev/null 2>&1; then
@@ -923,29 +1029,26 @@ kubeconfig_and_port_forward() {
         return 1
     fi
 
-    # Start a foreground port-forward. The path is:
-    #   local:6443  ->  bastion:<mid_port>  ->  master:6443
-    # The middle hop deliberately uses a RANDOM high port on the bastion, NOT
-    # 6443. The old code bound 6443 on the bastion too, so a stale forward left
-    # on the bastion's 6443 (from an interrupted session or another engineer)
-    # made every new connect fail with "bind [127.0.0.1]:6443: Address already
-    # in use" - even when the LOCAL 6443 was free. A random mid port avoids it.
-    local mid_port=$(( 20000 + (RANDOM % 20000) ))
-
+    # Start a foreground port-forward: local:6443 -> master:6443, with the
+    # bastion proxying stdio only. Nothing binds on the bastion, so the old
+    # random mid-port - which existed because the previous shape ALSO bound
+    # 6443 on the bastion, letting one engineer's stale forward break everyone
+    # else's with "bind [127.0.0.1]:6443: Address already in use" - is no
+    # longer needed. The only listener is the local one, which we check for
+    # and free above.
     echo ""
-    echo "Starting port forward: localhost:6443 -> $hostname:6443 (via bastion:$mid_port)"
+    echo "Starting port forward: localhost:6443 -> $hostname:6443 (via $bastion_ip)"
     echo "Leave this running; use kubectl from another terminal (e.g. kubectl get nodes)."
     echo "Press Ctrl+C to stop."
     echo ""
 
-    # ExitOnForwardFailure on BOTH hops so a bind clash fails fast instead of
-    # hanging. Capture exit status + elapsed time to distinguish a real bind
-    # failure (exits immediately) from a normal user Ctrl+C (ran for a while).
+    # ExitOnForwardFailure so a bind clash fails fast instead of hanging.
+    # Capture exit status + elapsed time to distinguish a real bind failure
+    # (exits immediately) from a normal user Ctrl+C (ran for a while).
     local fwd_start fwd_rc=0
     fwd_start=$(date +%s)
-    ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
-        -L "6443:localhost:${mid_port}" -t cluster@"$bastion_ip" \
-        "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes -N -L ${mid_port}:localhost:6443 cluster@$target_ip" || fwd_rc=$?
+    node_ssh "$bastion_ip" "$target_ip" \
+        -o ExitOnForwardFailure=yes -N -L "6443:localhost:6443" || fwd_rc=$?
     local fwd_elapsed=$(( $(date +%s) - fwd_start ))
 
     echo ""
@@ -1774,14 +1877,18 @@ connect_ssh() {
     local role="${4:-}"
     local target_ip="${5:-}"
     
-    # Check if this IS the bastion
+    # Check if this IS the bastion - a single direct hop, no jump needed, so it
+    # never used agent forwarding and needs no conversion. Uses SSH_OPTS so it
+    # gets the same keepalives as every other hop.
     if [[ "$role" == "BASTION" ]]; then
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@"$bastion_ip"
+        ssh "${SSH_OPTS[@]}" cluster@"$bastion_ip"
     else
         
-        # Use agent forwarding with private IP address
-        ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -t cluster@"$bastion_ip" \
-            "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@$target_ip"
+        # Reach the node through the bastion on its private IP
+        # A single local ssh with a real PTY on the node: window resizing,
+        # Ctrl-C and the exit status all behave natively, and closing it tears
+        # down the bastion hop instead of orphaning an ssh over there.
+        node_ssh "$bastion_ip" "$target_ip" -t
     fi
 }
 

@@ -33,6 +33,7 @@ if [ "$(tail -n1 .devcontainer/tools/gluekube_ssh.sh)" != 'main "$@"' ]; then
 fi
 # ast.parse rather than py_compile: same syntax coverage, but writes no __pycache__ artifact
 echo "== py_syntax"; python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1])' .devcontainer/libexec/gluekube_ssh/bootstrap.py
+echo "== node-ssh"; bash .devcontainer/tests/gluekube_ssh/node-ssh.sh
 echo "== browse-fallback"; bash .devcontainer/tests/gluekube_ssh/browse-fallback.sh
 echo "== ansible-guards"; bash .devcontainer/tests/gluekube_ssh/ansible-guards.sh
 if [ "${GLUEKUBE_TEST_DOCKER:-0}" = 1 ]; then
