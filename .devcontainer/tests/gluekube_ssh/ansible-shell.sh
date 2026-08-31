@@ -61,7 +61,9 @@ stat -c '%a %n' ~/.ssh/gluekube_* && cat ~/.ssh/gluekube_0
 df ~/.ssh | tail -1
 env | grep -q '^AUTOGLUE_API_KEY=' || echo "api key scrubbed"
 pwd
-bash -ic 'echo "PS1=$PS1"; type -t raw; type -t inv; type -t pycheck; type -t gkhelp' 2>/dev/null
+# Tag each helper with its own name: a bare `type -t` prints "function" for
+# three of them, so an untagged assertion passes even when its helper is gone.
+bash -ic 'echo "PS1=$PS1"; for h in raw inv pycheck gkhelp; do echo "helper:$h=$(type -t "$h")"; done' 2>/dev/null
 bash -ic 'gkhelp' 2>/dev/null | grep -c "Explore (read-only):" | sed 's/^/gkhelp-sections=/'
 CMDS
 
@@ -94,9 +96,14 @@ else
     check "no /work mount outside /workspaces" '^/home/ansible$'
 fi
 check "PS1 carries the cluster name"   'PS1=.*nonprod\.test\.onglueops\.com'
-check "raw helper is a function"       '^function$'
-check "inv helper is an alias"         '^alias$'
-check "pycheck + gkhelp helpers exist" 'gkhelp-sections=1'
+check "raw helper is a function"       '^helper:raw=function$'
+check "inv helper is an alias"         '^helper:inv=alias$'
+check "pycheck helper is a function"   '^helper:pycheck=function$'
+check "gkhelp helper is a function"    '^helper:gkhelp=function$'
+check "gkhelp reprints the banner"     'gkhelp-sections=1'
+# The pre-warm targets a TEST-NET bastion here, so its failure path runs on
+# every container test - assert it degrades with a note instead of dying.
+check "prewarm failure is noted"       'could not pre-open the shared bastion connection'
 # Banner contract: discovery examples for people new to ansible, and NO blanket
 # "nodes have no python3" claim (it is not true of every cluster). The python
 # constraint stays only as a conditional troubleshooting note.

@@ -107,32 +107,37 @@ if failed:
 # cluster (prefer workers; fall back to any non-bastion group, then to "all").
 eg = "workers" if "workers" in groups else next(
     (g for g in sorted(groups) if g != "bastions"), "all")
+# Same for the control-plane example: the group is built as role + "s", so a
+# cluster whose role is e.g. "controlplane" has no "masters" group at all and a
+# hardcoded one would silently match nothing ("No hosts matched", rc=0).
+mg = "masters" if "masters" in groups else eg
 
 
-def cmd(c, note="", width=44):
-    return "  %-*s %s" % (width, c, note) if note else "  " + c
+def block(title, rows):
+    """Render a titled block, auto-sizing the description column so a long
+    dynamic group name can never push the notes out of alignment."""
+    w = max([len(c) for c, n in rows if n] or [0])
+    return [title] + ["  %-*s  %s" % (w, c, n) if n else "  " + c for c, n in rows]
 
 
 # Deliberately: no `ansible-playbook` example (fails verbatim unless the file
 # exists, and playbooks are an advanced job), and `-m ping` appears only in the
 # troubleshooting note - it is the command most likely to fail confusingly for a
 # newcomer on a cluster whose nodes lack python3.
-body = [
+body = [""] + block("Explore (read-only):", [
+    ("ansible-inventory --graph", "the inventory as a tree"),
+    ("ansible-inventory --list", "everything, with host vars"),
+    ("ansible %s --list-hosts" % eg, "just the hosts in one group"),
+    ("ansible all -m raw -a 'hostname'", "one line per node; checks connectivity"),
+]) + [""] + block("Run a command on a group:", [
+    ("ansible all -m raw -a 'uptime'", ""),
+    ("ansible %s -m raw -a 'df -h /'" % eg, ""),
+    ("ansible %s -m script -a /work/yours.sh" % mg, "runs YOUR local script there"),
+]) + [
     "",
-    "Explore (read-only):",
-    cmd("ansible-inventory --graph", "the inventory as a tree"),
-    cmd("ansible-inventory --list", "everything, with host vars"),
-    cmd("ansible %s --list-hosts" % eg, "just the hosts in one group"),
-    cmd("ansible all -m raw -a 'hostname'", "one line per node; checks connectivity"),
-    "",
-    "Run a command on a group:",
-    cmd("ansible all -m raw -a 'uptime'"),
-    cmd("ansible %s -m raw -a 'df -h /'" % eg),
-    cmd("ansible masters -m script -a /work/yours.sh", "runs YOUR local script there"),
-    "",
-    "raw and script work over plain SSH on any node. If -m ping / -m setup / -m apt",
-    "fail with a Python interpreter error, that node has no python3 - use raw or",
-    "script instead (pycheck tells you which nodes have it).",
+    "raw and script work over plain SSH on any node. If -m ping or -m setup fail",
+    "with a Python interpreter error, that node has no python3 - use raw or script",
+    "instead (pycheck tells you which nodes have it).",
 ]
 if os.environ.get("GLUEKUBE_WORK_MOUNTED") == "1":
     body += ["", "/work is your current directory, mounted read-write."]
@@ -141,14 +146,12 @@ if os.environ.get("GLUEKUBE_WORK_MOUNTED") == "1":
 # piped shell (gluekube_ssh ... --ansible <<< "...") never defines them. So the
 # examples above are all plain ansible (always paste-able), and these are shown
 # only when they actually exist.
-shortcuts = [
-    "",
-    "Shortcuts:",
-    cmd("inv", "= ansible-inventory --graph", 24),
-    cmd("raw <group> <cmd...>", "= ansible <group> -m raw -a '<cmd...>'", 24),
-    cmd("pycheck [group]", "which nodes have python3", 24),
-    cmd("gkhelp", "print this again", 24),
-]
+shortcuts = [""] + block("Shortcuts:", [
+    ("inv", "= ansible-inventory --graph"),
+    ("raw <group> <cmd...>", "= ansible <group> -m raw -a '<cmd...>'"),
+    ("pycheck [group]", "which nodes have python3"),
+    ("gkhelp", "print this again"),
+])
 
 # gkhelp reprints from a file rather than duplicating the text: this shell is
 # short-lived and the banner scrolls off within seconds of the first command.
