@@ -4,9 +4,9 @@ on:
     paths:
       - '.devcontainer/tools/captain_utils.sh'
       - '.devcontainer/Dockerfile'
-      - '.devcontainer/libexec/**'
-      - '.devcontainer/tests/**'
-      - 'hack/test.sh'
+      - '.devcontainer/libexec/captain_utils/**'
+      - '.devcontainer/tests/captain_utils/**'
+      - 'hack/test-captain-utils.sh'
       - '.github/workflows/captain-utils-tests.yaml'
   workflow_dispatch:
 
@@ -21,8 +21,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install shellcheck
         run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-      - name: hack/test.sh
-        run: ./hack/test.sh
+      - name: hack/test-captain-utils.sh
+        run: ./hack/test-captain-utils.sh
 
   # The cluster test, kept as its own job so the offline suite above stays a 5-second signal. It proves the one thing
   # stubs cannot: a real finalizer pins a CRD in Terminating, the apply is refused, and the CRD keeps its finalizers —
