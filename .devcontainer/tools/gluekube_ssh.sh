@@ -456,7 +456,13 @@ browse_infrastructure() {
 
 # Options shared by every ssh invocation in this tool. An array, not a string,
 # so nothing is re-split by the shell.
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+#
+# The keepalives matter most for the port-forward, which the tool explicitly
+# tells you to leave running: without them a silently dropped TCP (a NAT idle
+# timeout, a bastion reboot) leaves a tunnel that still LOOKS alive, and kubectl
+# just hangs against it. 15s x 3 tears it down in ~45s instead.
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
+          -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
 
 # Reach a cluster node THROUGH the bastion.
 #
