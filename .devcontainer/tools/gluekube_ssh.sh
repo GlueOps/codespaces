@@ -358,7 +358,11 @@ browse_infrastructure() {
             
             # Add node pool servers
             local node_servers
-            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null || true)
+            # select(.role != null): ascii_upcase throws on a null role, and
+            # because jq streams, that aborts the run mid-list - every server
+            # after a mid-provision one would silently vanish from the menu
+            # (the 2>/dev/null || true hides the error entirely).
+            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select(.role != null and .hostname != null) | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null || true)
             
             if [[ -n "$node_servers" ]]; then
                 if [[ -n "$servers" ]]; then
@@ -1165,21 +1169,34 @@ ansible_shell_mode() {
     #  - The synthetic bastions group is merged LAST so a node-pool server
     #    whose role is itself "bastion" (spec-permitted) can never overwrite
     #    the real bastion and hide it from `ansible all`.
-    local addr_re='^[A-Za-z0-9.:_-]+$'
+    # \z (not $) so a trailing newline can't sneak past; the type check keeps a
+    # non-string IP from making test() throw and killing the WHOLE inventory
+    # build when the intent is to drop just that one server.
+    local addr_re='^[A-Za-z0-9.:_-]+\z'
+    # An IPv6 literal must be bracketed in a ProxyJump spec or ssh rejects it.
+    local jump_host="$bastion_ip"
+    [[ "$bastion_ip" == *:* ]] && jump_host="[$bastion_ip]"
     local inventory
     inventory=$(echo "$cluster" | jq \
-        --arg jump "-o ProxyJump=cluster@$bastion_ip" --arg addr_re "$addr_re" '
+        --arg jump "-o ProxyJump=cluster@$jump_host" --arg addr_re "$addr_re" '
         def ip: if ((.private_ip_address // "N/A") != "N/A" and (.private_ip_address // "") != "")
                 then .private_ip_address else (.public_ip_address // "") end;
+        def addr_ok: (type == "string") and test($addr_re);
         {all: {
             vars: {ansible_user: "cluster"},
             children: (
                 ([.node_pools[]?.servers[]?
                   | select(.hostname != null and .role != null)
-                  | . + {_ip: ip}
-                  | select(._ip != "" and (._ip | test($addr_re)))]
-                 | group_by(.role)
-                 | map({key: ((.[0].role | ascii_downcase) + "s"),
+                  | . + {_ip: ip, _role: (.role | ascii_downcase)}
+                  | select(._ip | addr_ok)]
+                 # group on the DOWNCASED role: grouping on the raw role would
+                 # put "worker" and "Worker" in separate groups that then map to
+                 # the same key, and from_entries would silently drop one.
+                 | group_by(._role)
+                 # a node whose own role is "bastion" gets its own group name so
+                 # it can neither overwrite nor be erased by the real bastion.
+                 | map({key: (if .[0]._role == "bastion" then "bastion_nodes"
+                              else .[0]._role + "s" end),
                         value: {hosts: (map({key: .hostname, value: {ansible_host: ._ip}}) | from_entries),
                                 vars: {ansible_ssh_common_args: $jump}}})
                  | from_entries)
@@ -1213,6 +1230,11 @@ ansible_shell_mode() {
         gum style --foreground 196 "✗ No SSH key ids found for this cluster"
         return 1
     fi
+
+    # Tell the bootstrap whether key 0 is the BASTION's: if that one key fails
+    # to fetch, every hop fails, so it must be fatal rather than a warning.
+    local bastion_key_first=0
+    [[ -n "$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')" ]] && bastion_key_first=1
 
     # SSH client config applied to both hops (bastion and node). The bastion
     # hop is multiplexed: every ansible fork's ProxyJump otherwise opens its
@@ -1315,6 +1337,7 @@ retries = 3
         -e AUTOGLUE_ORG_ID="$org_id" \
         -e GLUEKUBE_CLUSTER_NAME="$cluster_name" \
         -e GLUEKUBE_SSH_KEY_IDS="$key_ids" \
+        -e GLUEKUBE_BASTION_KEY_FIRST="$bastion_key_first" \
         -e GLUEKUBE_INVENTORY_YML="$inventory" \
         -e GLUEKUBE_SSH_CONFIG="$ssh_config" \
         -e GLUEKUBE_ANSIBLE_CFG="$ansible_cfg" \

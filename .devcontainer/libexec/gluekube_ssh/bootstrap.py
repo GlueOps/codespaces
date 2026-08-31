@@ -18,6 +18,7 @@ os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
 
 key_ids = os.environ["GLUEKUBE_SSH_KEY_IDS"].split()
 failed = []
+failed_idx = []
 for i, kid in enumerate(key_ids):
     try:
         key = (api("/ssh/%s?reveal=true" % kid).get("private_key") or "").strip()
@@ -29,6 +30,7 @@ for i, kid in enumerate(key_ids):
             f.write(key + "\n")
     except Exception as exc:
         failed.append("%s (%s)" % (kid, exc))
+        failed_idx.append(i)
 
 with open(os.path.join(ssh_dir, "config"), "w") as f:
     f.write(os.environ["GLUEKUBE_SSH_CONFIG"])
@@ -66,8 +68,13 @@ if failed:
     # "Permission denied (publickey)", and the API key is scrubbed below so keys
     # can't be re-fetched in-container. Fail loudly instead, matching how this
     # bootstrap already exits on an empty inventory or empty key list.
-    if len(failed) == len(key_ids):
-        print("ERROR: could not fetch ANY SSH key (%s)." % ", ".join(failed))
+    # Key 0 is the bastion's (bash orders it first) whenever the bastion has
+    # one. Its loss is as fatal as losing them all: every hop is a ProxyJump
+    # through the bastion, so nothing would be reachable.
+    bastion_key_failed = os.environ.get("GLUEKUBE_BASTION_KEY_FIRST") == "1" and 0 in failed_idx
+    if len(failed) == len(key_ids) or bastion_key_failed:
+        what = "the BASTION SSH key" if bastion_key_failed else "ANY SSH key"
+        print("ERROR: could not fetch %s (%s)." % (what, ", ".join(failed)))
         print("Every ansible run would fail with 'Permission denied' - check the "
               "API key/permissions and re-run. Not starting a broken shell.")
         sys.exit(1)

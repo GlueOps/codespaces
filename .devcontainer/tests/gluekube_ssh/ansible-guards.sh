@@ -85,7 +85,27 @@ check "masters group present" '"masters"' "$DOCKERLOG"
 check "ProxyJump through the bastion set" "ProxyJump=cluster@203.0.113.10" "$DOCKERLOG"
 check "real bastion survives as a host" "real-bastion" "$DOCKERLOG"
 check_absent "injection IP dropped from inventory" "lookup" "$DOCKERLOG"
-check_absent "role-bastion node cannot hide real bastion" "fake-bastion" "$DOCKERLOG"
+check "role-bastion node kept in its own group" '"bastion_nodes"' "$DOCKERLOG"
+
+##### G5 malformed/odd server data degrades gracefully, never wholesale #####
+echo "##### G5 one bad server never kills the whole inventory #####"
+: > "$DOCKERLOG"
+# non-string IP (must drop only that server, not abort the jq), case-variant
+# roles (must merge into one group, not silently lose a host), trailing-newline
+# IP (must be rejected by the \z anchor), and a healthy master that must survive.
+odd_cluster='{"bastion_server":{"hostname":"b","public_ip_address":"203.0.113.10","ssh_key_id":"k1"},"node_pools":[{"servers":[
+  {"role":"master","hostname":"m1","status":"ready","private_ip_address":"10.0.0.11","ssh_key_id":"k2"},
+  {"role":"worker","hostname":"numeric-ip","status":"ready","private_ip_address":12345,"ssh_key_id":"k2"},
+  {"role":"worker","hostname":"w-lower","status":"ready","private_ip_address":"10.0.0.21","ssh_key_id":"k2"},
+  {"role":"Worker","hostname":"w-upper","status":"ready","private_ip_address":"10.0.0.22","ssh_key_id":"k2"},
+  {"role":"worker","hostname":"trailing-nl","status":"ready","private_ip_address":"10.0.0.23\n","ssh_key_id":"k2"}]}]}'
+ansible_shell_mode "$odd_cluster" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
+check_eq "succeeds despite bad rows (rc=0)" "$?" "0"
+check "healthy master survived" "m1" "$DOCKERLOG"
+check "case-variant worker kept (roles merged)" "w-upper" "$DOCKERLOG"
+check "lower-case worker kept" "w-lower" "$DOCKERLOG"
+check_absent "non-string IP server dropped" "numeric-ip" "$DOCKERLOG"
+check_absent "trailing-newline IP server dropped" "trailing-nl" "$DOCKERLOG"
 
 echo "ansible-guards.sh: $((pass + fail)) assertions, FAILS=$fail"
 exit $(( fail > 0 ? 1 : 0 ))
