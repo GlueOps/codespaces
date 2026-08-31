@@ -494,10 +494,17 @@ node_ssh() {
     # %h inside that same string, so it reaches a shell indirectly; today only
     # OpenSSH's own hostname validation stops a hostile value, and relying on
     # that would make us version-dependent. Guard both the same way.
+    # Errors go to STDERR: callers redirect this function's stdout straight into
+    # a file (the kubeconfig fetches do), so a message on stdout would land
+    # inside it.
     local addr
     for addr in "$bastion_ip" "$target_ip"; do
+        if [[ -z "$addr" || "$addr" == "N/A" ]]; then
+            gum style --foreground 196 "✗ This server has no usable address - cannot connect" >&2
+            return 1
+        fi
         if [[ ! "$addr" =~ ^[A-Za-z0-9.:_-]+$ ]]; then
-            gum style --foreground 196 "✗ Address '$addr' contains unexpected characters - refusing"
+            gum style --foreground 196 "✗ Address '$addr' contains unexpected characters - refusing" >&2
             return 1
         fi
     done
@@ -515,6 +522,12 @@ node_ssh() {
     # SSH_OPTS holds fixed, space-free literals, so embedding it in the command
     # string is safe; $bastion_ip is guarded above because this string IS run by
     # a shell.
+    #
+    # IPv4 only in practice: AutoGlue returns IPv4 for both addresses today, and
+    # unlike ansible_shell_mode (which brackets its ProxyJump spec) this `-W
+    # %h:%p` form has never been exercised with an IPv6 literal. If IPv6 nodes
+    # ever appear, verify the -W spec parses before trusting it rather than
+    # assuming the bracket rules match.
     ssh "${SSH_OPTS[@]}" \
         -o "ProxyCommand=ssh ${SSH_OPTS[*]} -W %h:%p cluster@$bastion_ip" \
         "${opts[@]}" "cluster@$target_ip" "$@"
@@ -522,11 +535,16 @@ node_ssh() {
 
 # Stop a backgrounded port-forward started as `( node_ssh ... ) &`.
 #
-# $! there is the WRAPPER subshell, not ssh: bash can only exec-optimize a
-# subshell whose body is a single simple command, and node_ssh is a function.
-# SIGTERM to the wrapper does not HUP its child, so killing only $! orphans the
-# ssh - which keeps holding local 6443 while the UI reports the forward stopped.
-# Kill the child first, then the wrapper.
+# $! there is the WRAPPER subshell, not ssh: bash only exec-optimizes a subshell
+# whose body is a single simple command, and node_ssh is a function. SIGTERM to
+# the wrapper does not HUP its child, so killing only $! orphans the ssh - which
+# keeps holding local 6443 while the UI reports the forward stopped. Killing the
+# children first fixes that, and is correct whichever process $! turns out to be.
+#
+# The ProxyCommand ssh is a GRANDCHILD and is deliberately not killed here: it
+# owns no local socket (the outer ssh holds the -L bind) and exits on EOF as
+# soon as its parent's stdio closes. Verified - the port is free the moment the
+# direct child dies.
 stop_port_forward() {
     local pid="${1:-}" child
     [[ -z "$pid" ]] && return 0
@@ -641,7 +659,8 @@ ssh_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        # Add the bastion + target keys to the agent (adds only - the agent is
+        # cleared by clear_ssh_keys when entering a cluster, not here)
         load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Connect directly - after exit, returns to server list
@@ -742,7 +761,8 @@ kubectl_mode() {
             target_ip="$public_ip"
         fi
         
-        # Load SSH keys for this connection (clears old keys, loads bastion + target)
+        # Add the bastion + target keys to the agent (adds only - the agent is
+        # cleared by clear_ssh_keys when entering a cluster, not here)
         load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
         
         # Stop existing port forward if running
@@ -885,7 +905,8 @@ kubeconfig_mode() {
     # Create ~/.kube directory if it doesn't exist
     mkdir -p ~/.kube
     
-    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    # Add the bastion + target keys to the agent (adds only - the agent is
+    # cleared by clear_ssh_keys when entering a cluster, not here)
     load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
     
     echo "Fetching kubeconfig from $hostname..."
@@ -947,7 +968,8 @@ kubeconfig_and_port_forward() {
     local bastion_key_id="$5"
     local target_key_id="$6"
 
-    # Load SSH keys for this connection (clears old keys, loads bastion + target)
+    # Add the bastion + target keys to the agent (adds only - the agent is
+    # cleared by clear_ssh_keys when entering a cluster, not here)
     load_connection_keys "$org_id" "$bastion_key_id" "$target_key_id"
 
     # Free local port 6443. The fetched kubeconfig pins the API server to
@@ -1855,9 +1877,11 @@ connect_ssh() {
     local role="${4:-}"
     local target_ip="${5:-}"
     
-    # Check if this IS the bastion
+    # Check if this IS the bastion - a single direct hop, no jump needed, so it
+    # never used agent forwarding and needs no conversion. Uses SSH_OPTS so it
+    # gets the same keepalives as every other hop.
     if [[ "$role" == "BASTION" ]]; then
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@"$bastion_ip"
+        ssh "${SSH_OPTS[@]}" cluster@"$bastion_ip"
     else
         
         # Reach the node through the bastion on its private IP

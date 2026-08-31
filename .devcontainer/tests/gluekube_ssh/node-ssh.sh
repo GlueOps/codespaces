@@ -88,6 +88,16 @@ for bad_pos in bastion target; do
     check "says why ($bad_pos)" "contains unexpected characters - refusing" "$OUT"
     check_eq "and never invokes ssh ($bad_pos)" "$(wc -c < "$ARGS")" "0"
 done
+# Refusals must go to STDERR: kubeconfig_mode redirects this function's stdout
+# straight into ~/.kube/config, so a message on stdout would overwrite it.
+: > "$ARGS"
+stdout_on_refusal=$(node_ssh 'evil$(id)' 10.0.0.2 -- hostname 2>/dev/null)
+check_eq "refusal writes nothing to stdout" "${#stdout_on_refusal}" "0"
+# A server with no usable IP is a normal mid-provision state, not an attack -
+# it should say so rather than talk about unexpected characters.
+: > "$OUT"
+node_ssh 10.0.0.1 "N/A" -- hostname > "$OUT" 2>&1
+check "missing address gets its own message" "no usable address" "$OUT"
 : > "$ARGS"
 node_ssh bastion.example.com 10.0.0.2 -- hostname
 check "accepts a DNS-name bastion" '^ProxyCommand=ssh .*cluster@bastion\.example\.com$' "$ARGS"
