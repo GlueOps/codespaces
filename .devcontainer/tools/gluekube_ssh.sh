@@ -1,13 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
+# The ansible-shell bootstrap lives OFF this file in ../libexec/gluekube_ssh/bootstrap.py
+# (installed by the Dockerfile to /usr/local/libexec/gluekube_ssh, resolved relative to this
+# script so a repo checkout uses its own copy). Dev reinstall is therefore two files:
+#   sudo install -m 0755 .devcontainer/tools/gluekube_ssh.sh /usr/local/bin/gluekube_ssh \
+#     && sudo install -D -m 0644 .devcontainer/libexec/gluekube_ssh/bootstrap.py /usr/local/libexec/gluekube_ssh/bootstrap.py
+
 # Config
 CONFIG_DIR="$HOME/.config/autoglue-ssh"
 CONFIG_FILE="$CONFIG_DIR/config.json"
-DEFAULT_ENDPOINT="https://autoglue.glueopshosted.com/api/v1"
 
-# Colors
-GUM_CHOOSE_HEADER="Select an option"
+# Image for the containerized Ansible shell. Digest-pinned so upgrades are a
+# deliberate edit here, never an implicit pull of whatever the tag points at.
+# NOTE: developer-setup.sh scrapes this exact line to pre-warm the image on the
+# VM golden image, via  sed -n 's/^ANSIBLE_IMAGE="\(.*\)"$/\1/p'  - keep it a
+# single bare assignment (no `readonly`, no trailing comment) or that breaks.
+# The hack/test-gluekube-ssh.sh "prewarm-contract" check guards this.
+ANSIBLE_IMAGE="willhallonline/ansible:2.19-debian-trixie-slim@sha256:51e9769e83a1b7afcf6ddd2a232a4f766b98c91a31e8476aee4e57677e106e3c"
 
 # Ensure config directory exists
 mkdir -p "$CONFIG_DIR"
@@ -251,13 +261,25 @@ browse_infrastructure() {
         if command -v gh &> /dev/null; then
             all_repos=$(gh repo list "$gh_org" --limit 200 --json name -q '.[].name' 2>/dev/null | grep "\\.${org_selection}$" || true)
         fi
-        
+
+        # No matching repos (none named for this org, or gh missing/unauthenticated):
+        # fall back to AutoGlue's own cluster list so the org stays browsable -
+        # the repo naming convention is a convenience, not the source of truth.
+        if [[ -z "$all_repos" ]]; then
+            all_repos=$(api_call GET "/clusters" "$org_id" | jq -r '.[].name' 2>/dev/null || true)
+        fi
+
         # Repository/Cluster selection loop
         while true; do
             clear
-            # If no repos found, fall back to showing clusters
             if [[ -z "$all_repos" ]]; then
-                echo "No GitHub repositories found for this organization"
+                # Nothing in GitHub or AutoGlue. Pause before breaking: the org
+                # menu clears the screen on its next iteration, so without the
+                # pause this message vanishes and the selection appears to
+                # silently bounce back to the org list.
+                gum style --foreground 208 "No clusters found in organization '$org_selection' (no AutoGlue clusters, no matching GitHub repos)"
+                echo ""
+                read -n 1 -s -r -p "Press any key to continue..." || true
                 break
             fi
             
@@ -336,7 +358,11 @@ browse_infrastructure() {
             
             # Add node pool servers
             local node_servers
-            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null || true)
+            # select(.role != null): ascii_upcase throws on a null role, and
+            # because jq streams, that aborts the run mid-list - every server
+            # after a mid-provision one would silently vanish from the menu
+            # (the 2>/dev/null || true hides the error entirely).
+            node_servers=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select(.role != null and .hostname != null) | "\(.role | ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null || true)
             
             if [[ -n "$node_servers" ]]; then
                 if [[ -n "$servers" ]]; then
@@ -357,7 +383,7 @@ browse_infrastructure() {
                 
                 # Only add SSH/kubectl/kubeconfig options if bastion exists
                 if [[ -n "$bastion_ip" ]] && [[ -n "$servers" ]]; then
-                    menu_options+=("🚀 Quick connect (fresh kubeconfig + port-forward)" "🔗 SSH to servers" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
+                    menu_options+=("🚀 Quick connect (fresh kubeconfig + port-forward)" "🔗 SSH to servers" "🅰️ Ansible shell (run across nodes)" "📡 Port forward to master (6443)" "⚙️ Setup ~/.kube/config")
                 fi
                 
                 # Add cluster action options (cluster exists in AutoGlue)
@@ -401,6 +427,12 @@ browse_infrastructure() {
                     "🔗 SSH to servers")
                         ssh_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
+                    "🅰️ Ansible shell (run across nodes)")
+                        if ! ansible_shell_mode "$cluster" "$org_id" "$cluster_selection"; then
+                            echo ""
+                            read -n 1 -s -r -p "Press any key to continue..." || true
+                        fi
+                        ;;
                     "📡 Port forward to master (6443)")
                         kubectl_mode "$cluster_id" "$bastion_ip" "$servers" "$org_id" "$bastion_key_id"
                         ;;
@@ -428,7 +460,7 @@ clear_ssh_keys() {
     local agent_status=0
     ssh-add -l >/dev/null 2>&1 || agent_status=$?
     if [[ $agent_status -eq 2 ]]; then
-        eval $(ssh-agent) > /dev/null
+        eval "$(ssh-agent)" > /dev/null
     fi
     
     # Clear all existing keys
@@ -463,7 +495,7 @@ load_connection_keys() {
     local agent_status=0
     ssh-add -l >/dev/null 2>&1 || agent_status=$?
     if [[ $agent_status -eq 2 ]]; then
-        eval $(ssh-agent) > /dev/null
+        eval "$(ssh-agent)" > /dev/null
     fi
     
     # Load bastion key
@@ -486,7 +518,7 @@ ssh_mode() {
         clear
         # Build formatted server list
         local server_list=""
-        while IFS='|' read -r role hostname status public_ip private_ip ssh_key_id; do
+        while IFS='|' read -r role hostname status public_ip private_ip _; do
             local pub_display="${public_ip}"
             local priv_display="${private_ip}"
             [[ "$public_ip" == "N/A" ]] && pub_display="N/A"
@@ -664,7 +696,8 @@ kubectl_mode() {
         echo "Starting port forward: localhost:6443 -> $hostname:6443 (via bastion:$mid_port)"
 
         # Create a temporary error log
-        local error_log=$(mktemp)
+        local error_log
+        error_log=$(mktemp)
 
         # Start port forward with error output captured - using proper backgrounding
         (ssh -A -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ExitOnForwardFailure=yes \
@@ -679,7 +712,8 @@ kubectl_mode() {
         sleep 3
         
         # Find the actual port forward process (not the parent shell)
-        local actual_pid=$(lsof -ti :6443 2>/dev/null || echo "")
+        local actual_pid
+        actual_pid=$(lsof -ti :6443 2>/dev/null || echo "")
         
         if [[ -n "$actual_pid" ]] && kill -0 "$ssh_pid" 2>/dev/null; then
             port_forward_pid="$ssh_pid"
@@ -1024,15 +1058,16 @@ relative_time() {
         return
     fi
     
-    local now=$(date +%s)
-    local then=$(date -d "$timestamp" +%s 2>/dev/null || echo "0")
-    
-    if [[ "$then" == "0" ]]; then
+    local now past
+    now=$(date +%s)
+    past=$(date -d "$timestamp" +%s 2>/dev/null || echo "0")
+
+    if [[ "$past" == "0" ]]; then
         echo "unknown"
         return
     fi
-    
-    local diff=$((now - then))
+
+    local diff=$((now - past))
     
     if [[ $diff -lt 0 ]]; then
         diff=$((diff * -1))
@@ -1077,6 +1112,239 @@ cluster_actions_mode() {
                 ;;
         esac
     done
+}
+
+# Ansible shell mode - drop into a containerized Ansible shell with the
+# cluster's nodes as inventory. Runs the same command (or playbooks) across
+# many nodes at once, e.g.:  ansible workers -m raw -a 'uptime'
+#
+# Design notes:
+#  - The inventory is built here with jq as JSON; JSON is valid YAML, so
+#    ansible's yaml inventory plugin reads it as-is.
+#  - SSH private keys are fetched from the AutoGlue API by a bootstrap that
+#    runs INSIDE the container, into a tmpfs-backed ~/.ssh - key material
+#    never touches any disk (the host docker daemon can only bind-mount
+#    /workspaces paths, which are git repos, so mounting keys is off-limits).
+#  - Nodes are reached via ProxyJump through the bastion, same path as the
+#    interactive SSH mode.
+ansible_shell_mode() {
+    local cluster="$1"
+    local org_id="$2"
+    local cluster_name="$3"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        gum style --foreground 196 "✗ docker is required for the Ansible shell"
+        return 1
+    fi
+
+    local bastion_ip
+    bastion_ip=$(echo "$cluster" | jq -r '.bastion_server.public_ip_address // empty')
+    if [[ -z "$bastion_ip" ]]; then
+        gum style --foreground 196 "✗ Cluster has no bastion - cannot run the Ansible shell"
+        return 1
+    fi
+
+    # Defense-in-depth: these two values are interpolated into the generated
+    # ssh config and the in-container PS1 (single-quoted), so refuse anything
+    # that is not plainly address/name shaped (IPv4/IPv6/hostname - matching
+    # what the other SSH modes accept) rather than trusting the API.
+    if [[ ! "$bastion_ip" =~ ^[A-Za-z0-9.:_-]+$ ]]; then
+        gum style --foreground 196 "✗ Bastion address '$bastion_ip' contains unexpected characters - refusing"
+        return 1
+    fi
+    if [[ ! "$cluster_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        gum style --foreground 196 "✗ Cluster name '$cluster_name' contains unexpected characters - refusing"
+        return 1
+    fi
+
+    # Groups: bastions, plus one group per node role (masters, workers, ...).
+    # Node groups get ProxyJump through the bastion; the bastion is direct.
+    #
+    # Three safety properties are enforced in the jq below:
+    #  - Node IPs are validated with the same address-shape regex as the
+    #    bastion (ansible_host is a Jinja2-templated sink; an API-supplied
+    #    "{{ lookup(...) }}" would otherwise execute on the controller). A
+    #    server whose usable IP is missing or malformed is dropped from the
+    #    inventory rather than admitted with a broken/hostile ansible_host.
+    #  - The synthetic bastions group is merged LAST so a node-pool server
+    #    whose role is itself "bastion" (spec-permitted) can never overwrite
+    #    the real bastion and hide it from `ansible all`.
+    # \z (not $) so a trailing newline can't sneak past; the type check keeps a
+    # non-string IP from making test() throw and killing the WHOLE inventory
+    # build when the intent is to drop just that one server.
+    local addr_re='^[A-Za-z0-9.:_-]+\z'
+    # An IPv6 literal must be bracketed in a ProxyJump spec or ssh rejects it.
+    local jump_host="$bastion_ip"
+    [[ "$bastion_ip" == *:* ]] && jump_host="[$bastion_ip]"
+    local inventory
+    inventory=$(echo "$cluster" | jq \
+        --arg jump "-o ProxyJump=cluster@$jump_host" --arg addr_re "$addr_re" '
+        def ip: if ((.private_ip_address // "N/A") != "N/A" and (.private_ip_address // "") != "")
+                then .private_ip_address else (.public_ip_address // "") end;
+        def addr_ok: (type == "string") and test($addr_re);
+        {all: {
+            vars: {ansible_user: "cluster"},
+            children: (
+                ([.node_pools[]?.servers[]?
+                  | select(.hostname != null and .role != null)
+                  | . + {_ip: ip, _role: (.role | ascii_downcase)}
+                  | select(._ip | addr_ok)]
+                 # group on the DOWNCASED role: grouping on the raw role would
+                 # put "worker" and "Worker" in separate groups that then map to
+                 # the same key, and from_entries would silently drop one.
+                 | group_by(._role)
+                 # a node whose own role is "bastion" gets its own group name so
+                 # it can neither overwrite nor be erased by the real bastion.
+                 | map({key: (if .[0]._role == "bastion" then "bastion_nodes"
+                              else .[0]._role + "s" end),
+                        value: {hosts: (map({key: .hostname, value: {ansible_host: ._ip}}) | from_entries),
+                                vars: {ansible_ssh_common_args: $jump}}})
+                 | from_entries)
+                + {bastions: {hosts: {(.bastion_server.hostname // "bastion"):
+                    {ansible_host: .bastion_server.public_ip_address}}}}
+            )
+        }}')
+
+    # jq failures (unexpected nulls in the cluster payload) land here as an
+    # empty string because callers run this function in condition contexts
+    # where errexit is off - fail loudly instead of booting a broken container.
+    if [[ -z "$inventory" ]]; then
+        gum style --foreground 196 "✗ Failed to build the inventory from the cluster data"
+        return 1
+    fi
+
+    # Every SSH key id this cluster uses (bastion + nodes), de-duplicated but
+    # keeping the BASTION key first. Every key becomes an IdentityFile under
+    # Host * below, and sshd's default MaxAuthTries (6) disconnects a host once
+    # too many keys are offered before the right one; putting the bastion key
+    # first guarantees the ProxyJump hop - whose failure makes every node
+    # UNREACHABLE - is never the connection that exhausts the limit.
+    local key_ids
+    key_ids=$(echo "$cluster" | jq -r \
+        '([.bastion_server.ssh_key_id] + [.node_pools[]?.servers[]?.ssh_key_id])
+         | map(select(. != null and . != ""))
+         | reduce .[] as $k ([]; if any(.[]; . == $k) then . else . + [$k] end)
+         | join(" ")')
+
+    if [[ -z "$key_ids" ]]; then
+        gum style --foreground 196 "✗ No SSH key ids found for this cluster"
+        return 1
+    fi
+
+    # Tell the bootstrap whether key 0 is the BASTION's: if that one key fails
+    # to fetch, every hop fails, so it must be fatal rather than a warning.
+    local bastion_key_first=0
+    [[ -n "$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')" ]] && bastion_key_first=1
+
+    # SSH client config applied to both hops (bastion and node). The bastion
+    # hop is multiplexed: every ansible fork's ProxyJump otherwise opens its
+    # own unauthenticated connection to the bastion at the same instant, and
+    # sshd's MaxStartups (default 10:30:100) randomly drops the overflow -
+    # which shows up as a random subset of nodes being UNREACHABLE. With
+    # ControlMaster all forks share one authenticated bastion connection.
+    local ssh_config="Host $bastion_ip
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%C
+  ControlPersist 5m
+
+Host *
+  User cluster
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LogLevel ERROR
+"
+    local i=0
+    for _ in $key_ids; do
+        ssh_config+="  IdentityFile ~/.ssh/gluekube_${i}"$'\n'
+        i=$((i + 1))
+    done
+
+    # forks stays under the bastion's MaxStartups soft limit (10) for the very
+    # first burst, before the shared control master is established; retries
+    # absorb any transient drop that still slips through.
+    local ansible_cfg="[defaults]
+inventory = /home/ansible/inventory.yml
+host_key_checking = False
+gathering = explicit
+interpreter_python = auto_silent
+forks = 8
+
+[ssh_connection]
+retries = 3
+"
+
+    # Runs inside the container: fetch keys into tmpfs ~/.ssh, lay down
+    # inventory/config, print a cheat-sheet banner, then exec bash. The code
+    # lives in libexec/gluekube_ssh/bootstrap.py and is delivered via env var
+    # (never a mount). Resolve it relative to this script - which lands on
+    # /usr/local/libexec when installed and on the checkout's libexec when run
+    # from the repo - with a fallback to the installed path for harnesses that
+    # source this file (BASH_SOURCE is then a /dev/fd path).
+    local libexec_dir
+    if [[ -n "${GLUEKUBE_SSH_LIBEXEC:-}" ]]; then
+        # Explicit override: honour it exactly. Do NOT fall back to the baked
+        # copy, or a developer iterating on bootstrap.py with a typo'd path
+        # would silently run the stale image copy and see no effect from edits.
+        libexec_dir="$GLUEKUBE_SSH_LIBEXEC"
+    else
+        # Script-relative (installed -> /usr/local/libexec; checkout -> its own
+        # libexec), with a fallback to the installed path for harnesses that
+        # source this file (BASH_SOURCE is then a /dev/fd path).
+        libexec_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../libexec/gluekube_ssh"
+        [[ -r "$libexec_dir/bootstrap.py" ]] || libexec_dir="/usr/local/libexec/gluekube_ssh"
+    fi
+    # NOTE: the assignment must stay OFF the `local` line - `local x=$(...)`
+    # returns local's 0 and would silently ship an empty bootstrap on failure.
+    local bootstrap
+    if ! bootstrap=$(cat "$libexec_dir/bootstrap.py" 2>/dev/null); then
+        gum style --foreground 196 "✗ bootstrap.py not found (looked in $libexec_dir)"
+        echo "Rebuild the codespace image, or set GLUEKUBE_SSH_LIBEXEC to the directory containing bootstrap.py."
+        return 1
+    fi
+
+    # The host docker daemon only shares /workspaces paths with this
+    # devcontainer, so the cwd is mounted at /work only when it qualifies.
+    local mount_args=() workdir="/home/ansible" work_mounted=0
+    if [[ "$PWD" == /workspaces/* ]]; then
+        mount_args+=(-v "$PWD:/work")
+        workdir="/work"
+        work_mounted=1
+    else
+        gum style --foreground 208 "⚠️  $PWD is not under /workspaces - /work will not be mounted"
+    fi
+
+    # The VM golden image pre-warms this image (see developer-setup.sh), so the
+    # pull normally only happens on VMs built before the pre-warm existed.
+    echo "Starting Ansible shell for $cluster_name (image typically pre-warmed on the VM; pulled now only if missing)..."
+
+    # Allocate a TTY only when we have one; without it, stdin still flows, so
+    # commands can be piped in:  gluekube_ssh ... --ansible <<< "ansible all -m raw -a uptime"
+    local tty_args=(-i)
+    [[ -t 0 ]] && tty_args+=(-t)
+
+    # The API key is passed with the name-only -e form (docker reads it from
+    # the client env) so it never appears in the docker client's ps-visible
+    # argv; it is still in the container env - acceptable on a user-owned VM,
+    # same exposure as the plaintext profile config.
+    AUTOGLUE_API_KEY="$API_KEY" \
+    docker run "${tty_args[@]}" --rm \
+        --hostname gluekube-ansible \
+        --tmpfs /home/ansible/.ssh:rw,mode=0700,uid=1000,gid=1000 \
+        "${mount_args[@]}" \
+        -w "$workdir" \
+        -e AUTOGLUE_ENDPOINT="$API_ENDPOINT" \
+        -e AUTOGLUE_API_KEY \
+        -e AUTOGLUE_ORG_ID="$org_id" \
+        -e GLUEKUBE_CLUSTER_NAME="$cluster_name" \
+        -e GLUEKUBE_SSH_KEY_IDS="$key_ids" \
+        -e GLUEKUBE_BASTION_KEY_FIRST="$bastion_key_first" \
+        -e GLUEKUBE_INVENTORY_YML="$inventory" \
+        -e GLUEKUBE_SSH_CONFIG="$ssh_config" \
+        -e GLUEKUBE_ANSIBLE_CFG="$ansible_cfg" \
+        -e GLUEKUBE_WORK_MOUNTED="$work_mounted" \
+        -e GLUEKUBE_BOOTSTRAP_PY="$bootstrap" \
+        "$ANSIBLE_IMAGE" \
+        python3 -c 'import os; exec(os.environ["GLUEKUBE_BOOTSTRAP_PY"])'
 }
 
 # Run actions mode - list available actions and trigger cluster runs
@@ -1231,8 +1499,9 @@ view_runs_mode() {
                     status_icon="•"
                     ;;
             esac
-            local formatted_time=$(format_timestamp "$created_at")
-            local relative=$(relative_time "$created_at")
+            local formatted_time relative
+            formatted_time=$(format_timestamp "$created_at")
+            relative=$(relative_time "$created_at")
             run_list+="[$status_icon $status] $action - $formatted_time ($relative)|$run_id"$'\n'
         done < <(echo "$runs" | jq -r '.[] | "\(.id)|\(.action)|\(.status)|\(.created_at)"' | awk -F'|' '{print $1 "|" $2 "|" $3 "|" $4}')
         
@@ -1281,12 +1550,13 @@ view_runs_mode() {
                 detail_finished=$(echo "$run_detail" | jq -r '.finished_at // "N/A"')
                 
                 # Format timestamps
-                local formatted_created=$(format_timestamp "$detail_created")
-                local relative_created=$(relative_time "$detail_created")
-                local formatted_updated=$(format_timestamp "$detail_updated")
-                local relative_updated=$(relative_time "$detail_updated")
-                local formatted_finished=$(format_timestamp "$detail_finished")
-                local relative_finished=$(relative_time "$detail_finished")
+                local formatted_created relative_created formatted_updated relative_updated formatted_finished relative_finished
+                formatted_created=$(format_timestamp "$detail_created")
+                relative_created=$(relative_time "$detail_created")
+                formatted_updated=$(format_timestamp "$detail_updated")
+                relative_updated=$(relative_time "$detail_updated")
+                formatted_finished=$(format_timestamp "$detail_finished")
+                relative_finished=$(relative_time "$detail_finished")
                 
                 echo "ID: $detail_id"
                 echo "Action: $detail_action"
@@ -1355,12 +1625,10 @@ clone_repo_mode() {
         return
     fi
     
-    local repo_exists=false
     local clone_success=false
-    
+
     # Check if directory already exists
     if [[ -d "$repo_name" ]]; then
-        repo_exists=true
         if [[ -d "$repo_name/.git" ]]; then
             echo "Checking repository status..."
             
@@ -1475,23 +1743,32 @@ USAGE:
                                                  Headless quick-connect: nuke ~/.kube/config,
                                                  fetch a fresh one from the first master, and
                                                  foreground port-forward localhost:6443 to it.
+  gluekube_ssh --profile <name> --cluster <fqdn> --ansible [--org <name>]
+                                                 Containerized Ansible shell with the cluster's
+                                                 nodes as inventory (groups: bastions/masters/
+                                                 workers), e.g. ansible all -m raw -a 'uptime'.
 
 OPTIONS:
-  --profile <name>   Saved profile to use (required for --cluster / --kubectl)
+  --profile <name>   Saved profile to use (required for --cluster / --kubectl / --ansible)
   --cluster <fqdn>   Which cluster to target
   --kubectl          Action: quick-connect (fresh kubeconfig + port-forward to the first
                      master). Requires --cluster.
+  --ansible          Action: Ansible shell in docker against the cluster's nodes.
+                     Requires --cluster. SSH keys stay in a container tmpfs; the current
+                     directory is mounted at /work when it is under /workspaces.
   --org <name>       Limit cluster lookup to this org (optional; otherwise all orgs are scanned)
   -h, --help         Show this help
 
-EXAMPLE:
+EXAMPLES:
   gluekube_ssh --profile nonprod --cluster nonprod.foobar.onglueops.com --kubectl
+  gluekube_ssh --profile nonprod --cluster nonprod.foobar.onglueops.com --ansible
 EOF
 }
 
-# Headless quick-connect: resolve a cluster by name (scanning orgs, or the one
-# given via --org), pick its FIRST master, and run the shared quick-connect.
-headless_quick_connect() {
+# Resolve a cluster by name (scanning orgs, or the one given via --org) and
+# fetch its full details. On success sets RESOLVED_ORG_ID and RESOLVED_CLUSTER
+# (the cluster's details JSON).
+resolve_cluster() {
     local cluster_name="$1"
     local org_filter="${2:-}"
 
@@ -1532,8 +1809,8 @@ headless_quick_connect() {
     # Scan org(s) for a cluster whose name matches; first match wins (the
     # derived org, if any, is tried first)
     local found_org_id="" found_cluster_id="" all_names=""
-    local org_id org_name clusters match names
-    while IFS='|' read -r org_id org_name; do
+    local org_id clusters match names
+    while IFS='|' read -r org_id _; do
         [[ -z "$org_id" ]] && continue
         clusters=$(api_call GET "/clusters" "$org_id")
         names=$(echo "$clusters" | jq -r '.[].name' 2>/dev/null || true)
@@ -1555,8 +1832,20 @@ headless_quick_connect() {
     fi
 
     # Fetch full cluster details
-    local cluster
-    cluster=$(api_call GET "/clusters/$found_cluster_id" "$found_org_id")
+    RESOLVED_ORG_ID="$found_org_id"
+    RESOLVED_CLUSTER=$(api_call GET "/clusters/$found_cluster_id" "$found_org_id")
+}
+
+# Headless quick-connect: resolve a cluster by name, pick its FIRST master,
+# and run the shared quick-connect.
+headless_quick_connect() {
+    local cluster_name="$1"
+    local org_filter="${2:-}"
+
+    resolve_cluster "$cluster_name" "$org_filter" || return 1
+
+    local cluster="$RESOLVED_CLUSTER"
+    local found_org_id="$RESOLVED_ORG_ID"
 
     local bastion_ip bastion_key_id
     bastion_ip=$(echo "$cluster" | jq -r '.bastion_server.public_ip_address // empty')
@@ -1569,7 +1858,7 @@ headless_quick_connect() {
 
     # First master node
     local master_line
-    master_line=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select((.role|ascii_downcase)=="master") | "\(.role|ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null | head -n1 || true)
+    master_line=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select(.role != null) | select((.role|ascii_downcase)=="master") | "\(.role|ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null | head -n1 || true)
 
     if [[ -z "$master_line" ]]; then
         gum style --foreground 196 "✗ No master nodes found for cluster '$cluster_name'"
@@ -1595,9 +1884,19 @@ headless_quick_connect() {
     kubeconfig_and_port_forward "$bastion_ip" "$hostname" "$target_ip" "$found_org_id" "$bastion_key_id" "$target_key_id"
 }
 
+# Headless Ansible shell: resolve a cluster by name, then drop into the
+# containerized Ansible shell against its nodes.
+headless_ansible() {
+    local cluster_name="$1"
+    local org_filter="${2:-}"
+
+    resolve_cluster "$cluster_name" "$org_filter" || return 1
+    ansible_shell_mode "$RESOLVED_CLUSTER" "$RESOLVED_ORG_ID" "$cluster_name"
+}
+
 # Main
 main() {
-    local arg_profile="" arg_cluster="" arg_org="" arg_kubectl=false
+    local arg_profile="" arg_cluster="" arg_org="" arg_kubectl=false arg_ansible=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -1614,6 +1913,10 @@ main() {
                 ;;
             --kubectl)
                 arg_kubectl=true
+                shift
+                ;;
+            --ansible)
+                arg_ansible=true
                 shift
                 ;;
             --org)
@@ -1647,25 +1950,33 @@ main() {
 
         API_KEY=$(echo "$profile" | jq -r '.api_key')
         API_ENDPOINT=$(echo "$profile" | jq -r '.api_endpoint')
-    elif [[ -n "$arg_cluster" ]] || [[ "$arg_kubectl" == true ]]; then
-        echo "Error: --cluster / --kubectl require --profile" >&2
+    elif [[ -n "$arg_cluster" ]] || [[ "$arg_kubectl" == true ]] || [[ "$arg_ansible" == true ]]; then
+        echo "Error: --cluster / --kubectl / --ansible require --profile" >&2
         exit 1
     else
         # Interactive profile selection
         profile_menu
     fi
 
-    # Headless quick-connect: --kubectl is the action, --cluster names the target
-    if [[ "$arg_kubectl" == true ]]; then
+    # Headless actions: --kubectl / --ansible are the action, --cluster names the target
+    if [[ "$arg_kubectl" == true ]] && [[ "$arg_ansible" == true ]]; then
+        echo "Error: --kubectl and --ansible are mutually exclusive" >&2
+        exit 1
+    fi
+    if [[ "$arg_kubectl" == true ]] || [[ "$arg_ansible" == true ]]; then
         if [[ -z "$arg_cluster" ]]; then
-            echo "Error: --kubectl requires --cluster <fqdn>" >&2
+            echo "Error: --kubectl / --ansible require --cluster <fqdn>" >&2
             exit 1
         fi
         local rc=0
-        headless_quick_connect "$arg_cluster" "$arg_org" || rc=$?
+        if [[ "$arg_kubectl" == true ]]; then
+            headless_quick_connect "$arg_cluster" "$arg_org" || rc=$?
+        else
+            headless_ansible "$arg_cluster" "$arg_org" || rc=$?
+        fi
         exit "$rc"
     elif [[ -n "$arg_cluster" ]]; then
-        echo "Error: --cluster requires an action (add --kubectl)" >&2
+        echo "Error: --cluster requires an action (add --kubectl or --ansible)" >&2
         exit 1
     fi
 
@@ -1673,4 +1984,7 @@ main() {
     browse_infrastructure
 }
 
+# main must stay the LAST line of this file: the test harnesses load the
+# functions without executing anything via  source <(sed '$d' gluekube_ssh.sh),
+# which deletes only the final line - anything added below breaks them.
 main "$@"

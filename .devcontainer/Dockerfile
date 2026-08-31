@@ -62,7 +62,7 @@ RUN for file in /etc/tools/*; do \
     done && \
     rm -rf /etc/tools
 
-# Internal helpers that must stay OFF the PATH (run by captain_utils by absolute path, not by people)
+# Internal helpers that must stay OFF the PATH (used by captain_utils and gluekube_ssh by absolute path, not by people)
 COPY libexec/ /usr/local/libexec/
 RUN chmod -R a+rX /usr/local/libexec && chmod +x /usr/local/libexec/captain_utils/crds
     

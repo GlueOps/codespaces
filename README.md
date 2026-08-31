@@ -68,7 +68,8 @@ predate the pin keep the legacy path, where the argocd step installs ArgoCD's ow
 
 The command lives at `.devcontainer/libexec/captain_utils/crds`, installed to `/usr/local/libexec/captain_utils/`
 and deliberately off the PATH; its file header carries the full usage and the contract it is held to. Tests:
-`hack/test.sh` (offline, seconds) and `CRDS_TEST_KIND=1 hack/test.sh` for the cluster test.
+`hack/test-captain-utils.sh` (offline, seconds) and `CRDS_TEST_KIND=1 hack/test-captain-utils.sh` for the cluster
+test. (`hack/test.sh` runs every app's suite, including gluekube_ssh's, which requires python3.)
 
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
