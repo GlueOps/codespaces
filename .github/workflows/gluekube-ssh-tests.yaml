@@ -1,0 +1,37 @@
+name: gluekube_ssh tests
+on:
+  pull_request:
+    paths:
+      - '.devcontainer/tools/gluekube_ssh.sh'
+      - '.devcontainer/Dockerfile'
+      - '.devcontainer/libexec/gluekube_ssh/**'
+      - '.devcontainer/tests/gluekube_ssh/**'
+      - 'hack/test-gluekube-ssh.sh'
+      - '.github/workflows/gluekube-ssh-tests.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: hack/test-gluekube-ssh.sh
+        run: ./hack/test-gluekube-ssh.sh
+
+  # The container test, kept as its own job so the offline suite above stays a seconds-fast signal
+  # (same pattern as captain_utils' crds-kind job). It boots the REAL pinned ansible image against a
+  # mock AutoGlue API and asserts the bootstrap contract end to end: inventory, ProxyJump, key fetch
+  # into tmpfs, env scrubbing, prompt/helpers.
+  ansible-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: ansible-shell.sh
+        run: bash .devcontainer/tests/gluekube_ssh/ansible-shell.sh
