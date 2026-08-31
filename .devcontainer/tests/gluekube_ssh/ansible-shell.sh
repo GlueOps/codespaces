@@ -8,15 +8,17 @@ set -u -o pipefail
 cd "$(dirname "$0")/../../.." || exit 1
 for c in docker jq python3; do command -v "$c" >/dev/null || { echo "ansible-shell.sh: $c is required" >&2; exit 1; }; done
 
-PORT=18923
 OUT=$(mktemp)
 MOCK_LOG=$(mktemp)
 cleanup() { [[ -n "${MOCK_PID:-}" ]] && kill "$MOCK_PID" 2>/dev/null; rm -f "$OUT" "$MOCK_LOG"; }
 trap cleanup EXIT
 
 # --- mock AutoGlue API: the bootstrap only calls /ssh/{id}?reveal=true ---
-python3 - "$PORT" >"$MOCK_LOG" 2>&1 <<'PYEOF' &
-import json, re, sys
+# Binds an EPHEMERAL port and announces it, rather than a fixed one: two runs of
+# this harness on one host would otherwise fight over the port and corrupt each
+# other's results (observed - it looks like an auth-header failure, not a clash).
+python3 - >"$MOCK_LOG" 2>&1 <<'PYEOF' &
+import json, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -26,10 +28,26 @@ class H(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
         self.wfile.write(body.encode())
     def log_message(self, *a): pass
-HTTPServer(("0.0.0.0", int(sys.argv[1])), H).serve_forever()
+srv = HTTPServer(("0.0.0.0", 0), H)
+print("PORT=%d" % srv.server_address[1], flush=True)
+srv.serve_forever()
 PYEOF
 MOCK_PID=$!
-sleep 1
+
+# Wait for the mock to actually bind and announce its port instead of sleeping
+# blind: a dead mock otherwise surfaces later as unrelated assertion failures.
+PORT=""
+for _ in $(seq 1 100); do
+    PORT=$(sed -n 's/^PORT=//p' "$MOCK_LOG" | head -1)
+    [[ -n "$PORT" ]] && break
+    kill -0 "$MOCK_PID" 2>/dev/null || break
+    sleep 0.1
+done
+if [[ -z "$PORT" ]]; then
+    echo "  FAIL: mock API never bound a port" >&2
+    cat "$MOCK_LOG" >&2
+    exit 1
+fi
 
 # The container runs on the host docker daemon; it reaches the mock via the bridge gateway.
 GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)
@@ -130,4 +148,10 @@ else
 fi
 
 echo "$((pass + fail)) assertions, $fail failures"
-[[ $fail -eq 0 ]] || { echo "--- container output ---"; cat "$OUT"; exit 1; }
+[[ $fail -eq 0 ]] || {
+    echo "--- container output ---"; cat "$OUT"
+    # The mock log is the first thing to check on a failure: if it never saw the
+    # requests, the fault is the harness/mock, not the tool under test.
+    echo "--- mock API log (port $PORT) ---"; cat "$MOCK_LOG"
+    exit 1
+}
