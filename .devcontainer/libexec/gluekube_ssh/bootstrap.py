@@ -63,10 +63,15 @@ color = "31" if "glueopshosted.com" in endpoint else "32"
 ps1 = (r"\[\e]0;ansible: %s\a\]\[\e[2m\]ansible\[\e[0m\] \[\e[1;%sm\]%s\[\e[0m\] "
        r"\[\e[1;34m\]\w\[\e[0m\] \$ ") % (cluster, color, cluster)
 with open(os.path.join(home, ".bashrc"), "a") as f:
+    # pycheck turns the "do these nodes have python3?" question from a claim the
+    # banner cannot honestly make into a two-second fact the operator can get.
+    # gkhelp is named to avoid shadowing bash's `help` builtin.
     f.write("""
 # --- gluekube_ssh ansible shell ---
 alias inv='ansible-inventory --graph'
 raw() { local g="$1"; shift; ansible "$g" -m raw -a "$*"; }
+pycheck() { ansible "${1:-all}" -m raw -a 'command -v python3 >/dev/null && echo has-python3 || echo NO-python3'; }
+gkhelp() { cat ~/.gluekube-banner; }
 PS1='%s'
 """ % ps1)
 
@@ -98,19 +103,62 @@ if failed:
         sys.exit(1)
     print("WARNING: could not fetch SSH key(s): %s" % ", ".join(failed))
     print("         SSH to the affected host(s) will fail.")
-print("""
-Nodes have no python3, so stick to modules that work over plain SSH:
-  ansible all     -m raw    -a 'uptime'
-  ansible workers -m raw    -a 'df -h /'
-  ansible masters -m script -a './somescript.sh'
-  ansible-playbook site.yml              # use gather_facts: false + raw/script""")
-# The raw/inv helpers live in ~/.bashrc, which only an interactive bash reads -
-# a headless piped shell (gluekube_ssh ... --ansible <<< "...") never defines
-# them, so only advertise them when stdin is a TTY.
-if sys.stdin.isatty():
-    print("Helpers: raw <group> <cmd...>  (e.g. raw workers uptime)   inv  (inventory graph)")
+# Name a REAL group in the examples so every one of them runs verbatim on this
+# cluster (prefer workers; fall back to any non-bastion group, then to "all").
+eg = "workers" if "workers" in groups else next(
+    (g for g in sorted(groups) if g != "bastions"), "all")
+
+
+def cmd(c, note="", width=44):
+    return "  %-*s %s" % (width, c, note) if note else "  " + c
+
+
+# Deliberately: no `ansible-playbook` example (fails verbatim unless the file
+# exists, and playbooks are an advanced job), and `-m ping` appears only in the
+# troubleshooting note - it is the command most likely to fail confusingly for a
+# newcomer on a cluster whose nodes lack python3.
+body = [
+    "",
+    "Explore (read-only):",
+    cmd("ansible-inventory --graph", "the inventory as a tree"),
+    cmd("ansible-inventory --list", "everything, with host vars"),
+    cmd("ansible %s --list-hosts" % eg, "just the hosts in one group"),
+    cmd("ansible all -m raw -a 'hostname'", "one line per node; checks connectivity"),
+    "",
+    "Run a command on a group:",
+    cmd("ansible all -m raw -a 'uptime'"),
+    cmd("ansible %s -m raw -a 'df -h /'" % eg),
+    cmd("ansible masters -m script -a /work/yours.sh", "runs YOUR local script there"),
+    "",
+    "raw and script work over plain SSH on any node. If -m ping / -m setup / -m apt",
+    "fail with a Python interpreter error, that node has no python3 - use raw or",
+    "script instead (pycheck tells you which nodes have it).",
+]
 if os.environ.get("GLUEKUBE_WORK_MOUNTED") == "1":
-    print("Your working directory is mounted read-write at /work (the current dir).")
+    body += ["", "/work is your current directory, mounted read-write."]
+
+# The shortcuts live in ~/.bashrc, which only an INTERACTIVE bash reads - a
+# piped shell (gluekube_ssh ... --ansible <<< "...") never defines them. So the
+# examples above are all plain ansible (always paste-able), and these are shown
+# only when they actually exist.
+shortcuts = [
+    "",
+    "Shortcuts:",
+    cmd("inv", "= ansible-inventory --graph", 24),
+    cmd("raw <group> <cmd...>", "= ansible <group> -m raw -a '<cmd...>'", 24),
+    cmd("pycheck [group]", "which nodes have python3", 24),
+    cmd("gkhelp", "print this again", 24),
+]
+
+# gkhelp reprints from a file rather than duplicating the text: this shell is
+# short-lived and the banner scrolls off within seconds of the first command.
+with open(os.path.join(home, ".gluekube-banner"), "w") as f:
+    f.write("\n".join(body + shortcuts) + "\n")
+
+print("\n".join(body))
+if sys.stdin.isatty():
+    print("\n".join(shortcuts))
+print()
 print("Type exit to leave.")
 print()
 

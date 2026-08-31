@@ -61,7 +61,8 @@ stat -c '%a %n' ~/.ssh/gluekube_* && cat ~/.ssh/gluekube_0
 df ~/.ssh | tail -1
 env | grep -q '^AUTOGLUE_API_KEY=' || echo "api key scrubbed"
 pwd
-bash -ic 'echo "PS1=$PS1"; type -t raw; type -t inv' 2>/dev/null
+bash -ic 'echo "PS1=$PS1"; type -t raw; type -t inv; type -t pycheck; type -t gkhelp' 2>/dev/null
+bash -ic 'gkhelp' 2>/dev/null | grep -c "Explore (read-only):" | sed 's/^/gkhelp-sections=/'
 CMDS
 
 pass=0; fail=0
@@ -95,6 +96,18 @@ fi
 check "PS1 carries the cluster name"   'PS1=.*nonprod\.test\.onglueops\.com'
 check "raw helper is a function"       '^function$'
 check "inv helper is an alias"         '^alias$'
+check "pycheck + gkhelp helpers exist" 'gkhelp-sections=1'
+# Banner contract: discovery examples for people new to ansible, and NO blanket
+# "nodes have no python3" claim (it is not true of every cluster). The python
+# constraint stays only as a conditional troubleshooting note.
+check "banner shows the inventory tree cmd"  'ansible-inventory --graph'
+check "banner shows the full-inventory cmd"  'ansible-inventory --list'
+check "banner shows a --list-hosts example"  'list-hosts'
+check "python note is conditional"           'has no python3 - use raw or'
+check_absent "no blanket no-python3 claim"   'Nodes have no python3'
+# Shortcuts must NOT be advertised here: this harness pipes stdin, so ~/.bashrc
+# is never read and the helpers genuinely do not exist in that shell.
+check_absent "shortcuts hidden when piped"   '^Shortcuts:'
 check_absent "no key-fetch warnings"   'WARNING: could not fetch'
 check_absent "no group/host name clash" 'Found both group and host'
 
