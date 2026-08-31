@@ -46,11 +46,13 @@ good_cluster() { # <bastion public_ip_address>
 }
 
 pass=0; fail=0
+# `--` so a pattern starting with `-` is not parsed as a grep option: that makes
+# grep error, and check_absent would score the non-match as a PASS.
 check() { # <desc> <extended-regex expected in file> <file>
-    if grep -qE "$2" "$3"; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL: $1 (missing: $2)"; fi
+    if grep -qE -- "$2" "$3"; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL: $1 (missing: $2)"; fi
 }
 check_absent() { # <desc> <extended-regex that must NOT appear> <file>
-    if grep -qE "$2" "$3"; then fail=$((fail+1)); echo "  FAIL: $1 (unexpected: $2)"; else pass=$((pass+1)); fi
+    if grep -qE -- "$2" "$3"; then fail=$((fail+1)); echo "  FAIL: $1 (unexpected: $2)"; else pass=$((pass+1)); fi
 }
 check_eq() { # <desc> <actual> <expected>
     if [[ "$2" == "$3" ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL: $1 (got '$2', want '$3')"; fi

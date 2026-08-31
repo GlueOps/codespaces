@@ -488,12 +488,19 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 node_ssh() {
     local bastion_ip="$1" target_ip="$2"
     shift 2
-    # bastion_ip comes from the API and is interpolated into a ProxyJump spec;
-    # keep it plainly address-shaped (same guard ansible_shell_mode applies).
-    if [[ ! "$bastion_ip" =~ ^[A-Za-z0-9.:_-]+$ ]]; then
-        gum style --foreground 196 "✗ Bastion address '$bastion_ip' contains unexpected characters - refusing"
-        return 1
-    fi
+    # Both addresses come from the API. bastion_ip is interpolated into the
+    # ProxyCommand string, which a shell runs - so it MUST be guarded.
+    # target_ip only ever appears as an argv element, but ssh substitutes it for
+    # %h inside that same string, so it reaches a shell indirectly; today only
+    # OpenSSH's own hostname validation stops a hostile value, and relying on
+    # that would make us version-dependent. Guard both the same way.
+    local addr
+    for addr in "$bastion_ip" "$target_ip"; do
+        if [[ ! "$addr" =~ ^[A-Za-z0-9.:_-]+$ ]]; then
+            gum style --foreground 196 "✗ Address '$addr' contains unexpected characters - refusing"
+            return 1
+        fi
+    done
     local opts=()
     while [[ $# -gt 0 && "$1" != "--" ]]; do opts+=("$1"); shift; done
     [[ "${1:-}" == "--" ]] && shift
@@ -511,6 +518,23 @@ node_ssh() {
     ssh "${SSH_OPTS[@]}" \
         -o "ProxyCommand=ssh ${SSH_OPTS[*]} -W %h:%p cluster@$bastion_ip" \
         "${opts[@]}" "cluster@$target_ip" "$@"
+}
+
+# Stop a backgrounded port-forward started as `( node_ssh ... ) &`.
+#
+# $! there is the WRAPPER subshell, not ssh: bash can only exec-optimize a
+# subshell whose body is a single simple command, and node_ssh is a function.
+# SIGTERM to the wrapper does not HUP its child, so killing only $! orphans the
+# ssh - which keeps holding local 6443 while the UI reports the forward stopped.
+# Kill the child first, then the wrapper.
+stop_port_forward() {
+    local pid="${1:-}" child
+    [[ -z "$pid" ]] && return 0
+    for child in $(ps -o pid= --ppid "$pid" 2>/dev/null); do
+        kill "$child" 2>/dev/null || true
+    done
+    kill "$pid" 2>/dev/null || true
+    return 0
 }
 
 # Clear all SSH keys from agent (called when entering a new cluster)
@@ -680,7 +704,7 @@ kubectl_mode() {
         if [[ -z "$server_selection" ]] || [[ "$server_selection" == "◀ Back" ]]; then
             # Clean up port forward if running
             if [[ -n "$port_forward_pid" ]]; then
-                kill "$port_forward_pid" 2>/dev/null || true
+                stop_port_forward "$port_forward_pid"
             fi
             return
         fi
@@ -688,7 +712,7 @@ kubectl_mode() {
         # Handle stop port forward
         if [[ "$server_selection" == "🛑 Stop Port Forward" ]]; then
             if [[ -n "$port_forward_pid" ]]; then
-                kill "$port_forward_pid" 2>/dev/null || true
+                stop_port_forward "$port_forward_pid"
                 port_forward_pid=""
                 port_forward_master=""
                 gum style --foreground 82 "✓ Port forward stopped"
@@ -723,7 +747,7 @@ kubectl_mode() {
         
         # Stop existing port forward if running
         if [[ -n "$port_forward_pid" ]]; then
-            kill "$port_forward_pid" 2>/dev/null || true
+            stop_port_forward "$port_forward_pid"
             port_forward_pid=""
             port_forward_master=""
         fi
@@ -797,7 +821,7 @@ kubectl_mode() {
             rm -f "$error_log"
             
             # Clean up the failed SSH process
-            kill "$ssh_pid" 2>/dev/null || true
+            stop_port_forward "$ssh_pid"
             
             port_forward_pid=""
             port_forward_master=""
@@ -866,7 +890,7 @@ kubeconfig_mode() {
     
     echo "Fetching kubeconfig from $hostname..."
     
-    # Copy the file through bastion using double-hop SCP with agent forwarding and private IP
+    # Read the file off the master through the bastion (no agent forwarding)
     # No -t: a PTY would translate newlines and let MOTD/banner text into the
     # captured kubeconfig. sudo needs no TTY here (it never had one on this hop).
     if node_ssh "$bastion_ip" "$target_ip" -- \
@@ -1836,7 +1860,7 @@ connect_ssh() {
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR cluster@"$bastion_ip"
     else
         
-        # Use agent forwarding with private IP address
+        # Reach the node through the bastion on its private IP
         # A single local ssh with a real PTY on the node: window resizing,
         # Ctrl-C and the exit status all behave natively, and closing it tears
         # down the bastion hop instead of orphaning an ssh over there.
