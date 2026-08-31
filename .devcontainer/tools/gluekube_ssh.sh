@@ -1178,18 +1178,23 @@ ansible_shell_mode() {
     [[ "$bastion_ip" == *:* ]] && jump_host="[$bastion_ip]"
 
     # The bastion's OWN connection must be pinned to the same shared control
-    # socket as everything else. Ansible always appends its own
-    # -o ControlPath=~/.ansible/cp/... which overrides ~/.ssh/config, so
-    # without this the bastion is the one host that cannot join the multiplexed
-    # connection and opens a brand-new TCP session on every single run - the
-    # exact connection that gets refused by a bastion rate-limiting SSH per
-    # source (e.g. `ufw limit ssh`: 5 new connections per 30s). ssh honours the
-    # FIRST value for a keyword and ansible_ssh_common_args lands ahead of
-    # ansible's own flag, so this wins.
+    # socket as everything else. Left alone, ansible generates its own
+    # -o ControlPath=~/.ansible/cp/..., so the bastion becomes the one host that
+    # cannot join the multiplexed connection and opens a brand-new TCP session
+    # on every single run - the exact connection refused by a bastion that rate
+    # limits SSH per source (e.g. `ufw limit ssh`: 5 new connections per 30s).
+    # Supplying a ControlPath here stops that: ansible detects a user-supplied
+    # ControlPath in the connection args and omits its own entirely, so ours is
+    # the only one on the command line (verified with `ansible -vvv`).
+    # ControlPersist is deliberately NOT set here - ansible's own ssh_args
+    # already carry `-o ControlPersist=60s` ahead of these, and ssh takes the
+    # first value for a keyword, so anything set here would never apply. The
+    # master's real lifetime comes from the Host block in ssh_config below,
+    # which is what the pre-warm and the ProxyJump hops use.
     # shellcheck disable=SC2088  # the ~ must stay LITERAL: ssh expands it itself,
     # and it has to resolve inside the container (/home/ansible), not out here.
     local control_path='~/.ssh/cm-%C' control_persist='5m'
-    local mux_args="-o ControlPath=$control_path -o ControlMaster=auto -o ControlPersist=$control_persist"
+    local mux_args="-o ControlPath=$control_path -o ControlMaster=auto"
     local inventory
     inventory=$(echo "$cluster" | jq \
         --arg jump "-o ProxyJump=cluster@$jump_host $mux_args" --arg mux "$mux_args" --arg addr_re "$addr_re" '
