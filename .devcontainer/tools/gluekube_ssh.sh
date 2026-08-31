@@ -1176,9 +1176,23 @@ ansible_shell_mode() {
     # An IPv6 literal must be bracketed in a ProxyJump spec or ssh rejects it.
     local jump_host="$bastion_ip"
     [[ "$bastion_ip" == *:* ]] && jump_host="[$bastion_ip]"
+
+    # The bastion's OWN connection must be pinned to the same shared control
+    # socket as everything else. Ansible always appends its own
+    # -o ControlPath=~/.ansible/cp/... which overrides ~/.ssh/config, so
+    # without this the bastion is the one host that cannot join the multiplexed
+    # connection and opens a brand-new TCP session on every single run - the
+    # exact connection that gets refused by a bastion rate-limiting SSH per
+    # source (e.g. `ufw limit ssh`: 5 new connections per 30s). ssh honours the
+    # FIRST value for a keyword and ansible_ssh_common_args lands ahead of
+    # ansible's own flag, so this wins.
+    # shellcheck disable=SC2088  # the ~ must stay LITERAL: ssh expands it itself,
+    # and it has to resolve inside the container (/home/ansible), not out here.
+    local control_path='~/.ssh/cm-%C' control_persist='5m'
+    local mux_args="-o ControlPath=$control_path -o ControlMaster=auto -o ControlPersist=$control_persist"
     local inventory
     inventory=$(echo "$cluster" | jq \
-        --arg jump "-o ProxyJump=cluster@$jump_host" --arg addr_re "$addr_re" '
+        --arg jump "-o ProxyJump=cluster@$jump_host $mux_args" --arg mux "$mux_args" --arg addr_re "$addr_re" '
         def ip: if ((.private_ip_address // "N/A") != "N/A" and (.private_ip_address // "") != "")
                 then .private_ip_address else (.public_ip_address // "") end;
         def addr_ok: (type == "string") and test($addr_re);
@@ -1201,7 +1215,8 @@ ansible_shell_mode() {
                                 vars: {ansible_ssh_common_args: $jump}}})
                  | from_entries)
                 + {bastions: {hosts: {(.bastion_server.hostname // "bastion"):
-                    {ansible_host: .bastion_server.public_ip_address}}}}
+                    {ansible_host: .bastion_server.public_ip_address}},
+                    vars: {ansible_ssh_common_args: $mux}}}
             )
         }}')
 
@@ -1236,16 +1251,18 @@ ansible_shell_mode() {
     local bastion_key_first=0
     [[ -n "$(echo "$cluster" | jq -r '.bastion_server.ssh_key_id // empty')" ]] && bastion_key_first=1
 
-    # SSH client config applied to both hops (bastion and node). The bastion
-    # hop is multiplexed: every ansible fork's ProxyJump otherwise opens its
-    # own unauthenticated connection to the bastion at the same instant, and
-    # sshd's MaxStartups (default 10:30:100) randomly drops the overflow -
-    # which shows up as a random subset of nodes being UNREACHABLE. With
-    # ControlMaster all forks share one authenticated bastion connection.
+    # SSH client config applied to both hops (bastion and node). Every hop to
+    # the bastion - each fork's ProxyJump and the bastion's own connection -
+    # shares ONE multiplexed TCP connection via this control socket. Without it
+    # each fork dials the bastion separately, which both trips sshd's
+    # MaxStartups (random nodes UNREACHABLE) and burns through a per-source
+    # connection rate limit if the bastion has one (`ufw limit ssh` refuses the
+    # 6th new connection in 30s), leaving the bastion itself refused.
+    # bootstrap.py pre-warms this socket so the forks never race to create it.
     local ssh_config="Host $bastion_ip
   ControlMaster auto
-  ControlPath ~/.ssh/cm-%C
-  ControlPersist 5m
+  ControlPath $control_path
+  ControlPersist $control_persist
 
 Host *
   User cluster
@@ -1259,9 +1276,10 @@ Host *
         i=$((i + 1))
     done
 
-    # forks stays under the bastion's MaxStartups soft limit (10) for the very
-    # first burst, before the shared control master is established; retries
-    # absorb any transient drop that still slips through.
+    # With the control socket pre-warmed, forks no longer cost one bastion
+    # connection each (they all multiplex over the one that is already up), so
+    # this is now just a parallelism choice rather than a connection budget.
+    # retries absorb any transient drop that still slips through.
     local ansible_cfg="[defaults]
 inventory = /home/ansible/inventory.yml
 host_key_checking = False
@@ -1338,6 +1356,7 @@ retries = 3
         -e GLUEKUBE_CLUSTER_NAME="$cluster_name" \
         -e GLUEKUBE_SSH_KEY_IDS="$key_ids" \
         -e GLUEKUBE_BASTION_KEY_FIRST="$bastion_key_first" \
+        -e GLUEKUBE_BASTION_HOST="$bastion_ip" \
         -e GLUEKUBE_INVENTORY_YML="$inventory" \
         -e GLUEKUBE_SSH_CONFIG="$ssh_config" \
         -e GLUEKUBE_ANSIBLE_CFG="$ansible_cfg" \

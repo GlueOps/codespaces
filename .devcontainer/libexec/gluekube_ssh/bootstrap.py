@@ -1,7 +1,7 @@
 """Ansible-shell bootstrap: runs INSIDE the container via exec() of $GLUEKUBE_BOOTSTRAP_PY.
 Reads: AUTOGLUE_ENDPOINT, AUTOGLUE_API_KEY, AUTOGLUE_ORG_ID, GLUEKUBE_SSH_KEY_IDS, GLUEKUBE_SSH_CONFIG,
 GLUEKUBE_INVENTORY_YML, GLUEKUBE_ANSIBLE_CFG, GLUEKUBE_CLUSTER_NAME, GLUEKUBE_WORK_MOUNTED."""
-import json, os, sys, urllib.request
+import json, os, subprocess, sys, urllib.request
 
 home = os.path.expanduser("~")
 endpoint = os.environ["AUTOGLUE_ENDPOINT"]
@@ -41,6 +41,20 @@ with open(os.path.join(home, "inventory.yml"), "w") as f:
 with open(os.path.join(home, ".ansible.cfg"), "w") as f:
     f.write(os.environ["GLUEKUBE_ANSIBLE_CFG"])
 
+# Pre-warm the shared control socket: open ONE connection to the bastion and
+# leave it running in the background. ControlMaster=auto does not serialize
+# master creation, so without this every ansible fork finds no socket and dials
+# the bastion at the same instant - a burst that trips sshd's MaxStartups and
+# blows through a per-source connection rate limit (`ufw limit ssh` refuses the
+# 6th new connection in 30s), which is what left the bastion itself UNREACHABLE
+# while the nodes rode the connection the burst eventually established.
+# With the socket already up, a whole run costs ONE connection to the bastion.
+# Best-effort: if it fails, ssh falls back to dialing per connection as before.
+prewarm = subprocess.run(
+    ["ssh", "-fN", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+     "cluster@" + os.environ["GLUEKUBE_BASTION_HOST"]],
+    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
 # Shell niceties: cluster name in the prompt (red = prod endpoint, green =
 # nonprod, mirroring get_gh_org's endpoint test) + terminal title + helpers.
 # Appended so it wins over anything the image's stock .bashrc sets.
@@ -63,6 +77,10 @@ counts = "  ".join("%s(%d)" % (g, len(v.get("hosts", {})))
 print()
 print("GlueKube Ansible shell - %s" % os.environ.get("GLUEKUBE_CLUSTER_NAME", "?"))
 print("Groups: %s" % counts)
+if prewarm.returncode != 0:
+    print("NOTE: could not pre-open the shared bastion connection (%s);"
+          % (prewarm.stderr.decode(errors="replace").strip().splitlines() or ["unknown"])[-1])
+    print("      runs still work, but each one dials the bastion more often.")
 if failed:
     # If EVERY key failed, the shell is unusable - every ansible run would fail
     # "Permission denied (publickey)", and the API key is scrubbed below so keys
