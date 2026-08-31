@@ -7,6 +7,8 @@ on:
       - '.devcontainer/libexec/gluekube_ssh/**'
       - '.devcontainer/tests/gluekube_ssh/**'
       - 'hack/test-gluekube-ssh.sh'
+      - 'hack/test.sh'
+      - 'developer-setup.sh'
       - '.github/workflows/gluekube-ssh-tests.yaml'
   workflow_dispatch:
 

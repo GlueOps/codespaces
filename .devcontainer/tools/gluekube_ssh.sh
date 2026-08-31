@@ -13,6 +13,10 @@ CONFIG_FILE="$CONFIG_DIR/config.json"
 
 # Image for the containerized Ansible shell. Digest-pinned so upgrades are a
 # deliberate edit here, never an implicit pull of whatever the tag points at.
+# NOTE: developer-setup.sh scrapes this exact line to pre-warm the image on the
+# VM golden image, via  sed -n 's/^ANSIBLE_IMAGE="\(.*\)"$/\1/p'  - keep it a
+# single bare assignment (no `readonly`, no trailing comment) or that breaks.
+# The hack/test-gluekube-ssh.sh "prewarm-contract" check guards this.
 ANSIBLE_IMAGE="willhallonline/ansible:2.19-debian-trixie-slim@sha256:51e9769e83a1b7afcf6ddd2a232a4f766b98c91a31e8476aee4e57677e106e3c"
 
 # Ensure config directory exists
@@ -1149,23 +1153,38 @@ ansible_shell_mode() {
         return 1
     fi
 
-    # Groups: bastion, plus one group per node role (masters, workers, ...).
+    # Groups: bastions, plus one group per node role (masters, workers, ...).
     # Node groups get ProxyJump through the bastion; the bastion is direct.
+    #
+    # Three safety properties are enforced in the jq below:
+    #  - Node IPs are validated with the same address-shape regex as the
+    #    bastion (ansible_host is a Jinja2-templated sink; an API-supplied
+    #    "{{ lookup(...) }}" would otherwise execute on the controller). A
+    #    server whose usable IP is missing or malformed is dropped from the
+    #    inventory rather than admitted with a broken/hostile ansible_host.
+    #  - The synthetic bastions group is merged LAST so a node-pool server
+    #    whose role is itself "bastion" (spec-permitted) can never overwrite
+    #    the real bastion and hide it from `ansible all`.
+    local addr_re='^[A-Za-z0-9.:_-]+$'
     local inventory
-    inventory=$(echo "$cluster" | jq --arg jump "-o ProxyJump=cluster@$bastion_ip" '
+    inventory=$(echo "$cluster" | jq \
+        --arg jump "-o ProxyJump=cluster@$bastion_ip" --arg addr_re "$addr_re" '
         def ip: if ((.private_ip_address // "N/A") != "N/A" and (.private_ip_address // "") != "")
                 then .private_ip_address else (.public_ip_address // "") end;
         {all: {
             vars: {ansible_user: "cluster"},
             children: (
-                {bastions: {hosts: {(.bastion_server.hostname // "bastion"):
+                ([.node_pools[]?.servers[]?
+                  | select(.hostname != null and .role != null)
+                  | . + {_ip: ip}
+                  | select(._ip != "" and (._ip | test($addr_re)))]
+                 | group_by(.role)
+                 | map({key: ((.[0].role | ascii_downcase) + "s"),
+                        value: {hosts: (map({key: .hostname, value: {ansible_host: ._ip}}) | from_entries),
+                                vars: {ansible_ssh_common_args: $jump}}})
+                 | from_entries)
+                + {bastions: {hosts: {(.bastion_server.hostname // "bastion"):
                     {ansible_host: .bastion_server.public_ip_address}}}}
-                + ([.node_pools[]?.servers[]? | select(.hostname != null and .role != null)]
-                   | group_by(.role)
-                   | map({key: ((.[0].role | ascii_downcase) + "s"),
-                          value: {hosts: (map({key: .hostname, value: {ansible_host: ip}}) | from_entries),
-                                  vars: {ansible_ssh_common_args: $jump}}})
-                   | from_entries)
             )
         }}')
 
@@ -1177,11 +1196,18 @@ ansible_shell_mode() {
         return 1
     fi
 
-    # Every SSH key id this cluster uses (bastion + nodes), de-duplicated
+    # Every SSH key id this cluster uses (bastion + nodes), de-duplicated but
+    # keeping the BASTION key first. Every key becomes an IdentityFile under
+    # Host * below, and sshd's default MaxAuthTries (6) disconnects a host once
+    # too many keys are offered before the right one; putting the bastion key
+    # first guarantees the ProxyJump hop - whose failure makes every node
+    # UNREACHABLE - is never the connection that exhausts the limit.
     local key_ids
     key_ids=$(echo "$cluster" | jq -r \
         '([.bastion_server.ssh_key_id] + [.node_pools[]?.servers[]?.ssh_key_id])
-         | map(select(. != null and . != "")) | unique | join(" ")')
+         | map(select(. != null and . != ""))
+         | reduce .[] as $k ([]; if any(.[]; . == $k) then . else . + [$k] end)
+         | join(" ")')
 
     if [[ -z "$key_ids" ]]; then
         gum style --foreground 196 "✗ No SSH key ids found for this cluster"
@@ -1233,8 +1259,18 @@ retries = 3
     # from the repo - with a fallback to the installed path for harnesses that
     # source this file (BASH_SOURCE is then a /dev/fd path).
     local libexec_dir
-    libexec_dir="${GLUEKUBE_SSH_LIBEXEC:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../libexec/gluekube_ssh}"
-    [[ -r "$libexec_dir/bootstrap.py" ]] || libexec_dir="/usr/local/libexec/gluekube_ssh"
+    if [[ -n "${GLUEKUBE_SSH_LIBEXEC:-}" ]]; then
+        # Explicit override: honour it exactly. Do NOT fall back to the baked
+        # copy, or a developer iterating on bootstrap.py with a typo'd path
+        # would silently run the stale image copy and see no effect from edits.
+        libexec_dir="$GLUEKUBE_SSH_LIBEXEC"
+    else
+        # Script-relative (installed -> /usr/local/libexec; checkout -> its own
+        # libexec), with a fallback to the installed path for harnesses that
+        # source this file (BASH_SOURCE is then a /dev/fd path).
+        libexec_dir="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../libexec/gluekube_ssh"
+        [[ -r "$libexec_dir/bootstrap.py" ]] || libexec_dir="/usr/local/libexec/gluekube_ssh"
+    fi
     # NOTE: the assignment must stay OFF the `local` line - `local x=$(...)`
     # returns local's 0 and would silently ship an empty bootstrap on failure.
     local bootstrap
@@ -1686,7 +1722,7 @@ USAGE:
                                                  foreground port-forward localhost:6443 to it.
   gluekube_ssh --profile <name> --cluster <fqdn> --ansible [--org <name>]
                                                  Containerized Ansible shell with the cluster's
-                                                 nodes as inventory (groups: bastion/masters/
+                                                 nodes as inventory (groups: bastions/masters/
                                                  workers), e.g. ansible all -m raw -a 'uptime'.
 
 OPTIONS:
@@ -1799,7 +1835,7 @@ headless_quick_connect() {
 
     # First master node
     local master_line
-    master_line=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select((.role|ascii_downcase)=="master") | "\(.role|ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null | head -n1 || true)
+    master_line=$(echo "$cluster" | jq -r '.node_pools[].servers[] | select(.role != null) | select((.role|ascii_downcase)=="master") | "\(.role|ascii_upcase)|\(.hostname)|\(.status)|\(.public_ip_address // "N/A")|\(.private_ip_address // "N/A")|\(.ssh_key_id // "")"' 2>/dev/null | head -n1 || true)
 
     if [[ -z "$master_line" ]]; then
         gum style --foreground 196 "✗ No master nodes found for cluster '$cluster_name'"

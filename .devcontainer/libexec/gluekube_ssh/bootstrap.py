@@ -16,8 +16,9 @@ def api(path):
 ssh_dir = os.path.join(home, ".ssh")
 os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
 
+key_ids = os.environ["GLUEKUBE_SSH_KEY_IDS"].split()
 failed = []
-for i, kid in enumerate(os.environ["GLUEKUBE_SSH_KEY_IDS"].split()):
+for i, kid in enumerate(key_ids):
     try:
         key = (api("/ssh/%s?reveal=true" % kid).get("private_key") or "").strip()
         if not key:
@@ -61,14 +62,28 @@ print()
 print("GlueKube Ansible shell - %s" % os.environ.get("GLUEKUBE_CLUSTER_NAME", "?"))
 print("Groups: %s" % counts)
 if failed:
+    # If EVERY key failed, the shell is unusable - every ansible run would fail
+    # "Permission denied (publickey)", and the API key is scrubbed below so keys
+    # can't be re-fetched in-container. Fail loudly instead, matching how this
+    # bootstrap already exits on an empty inventory or empty key list.
+    if len(failed) == len(key_ids):
+        print("ERROR: could not fetch ANY SSH key (%s)." % ", ".join(failed))
+        print("Every ansible run would fail with 'Permission denied' - check the "
+              "API key/permissions and re-run. Not starting a broken shell.")
+        sys.exit(1)
     print("WARNING: could not fetch SSH key(s): %s" % ", ".join(failed))
+    print("         SSH to the affected host(s) will fail.")
 print("""
 Nodes have no python3, so stick to modules that work over plain SSH:
   ansible all     -m raw    -a 'uptime'
   ansible workers -m raw    -a 'df -h /'
   ansible masters -m script -a './somescript.sh'
-  ansible-playbook site.yml              # use gather_facts: false + raw/script
-Helpers: raw <group> <cmd...>  (e.g. raw workers uptime)   inv  (inventory graph)""")
+  ansible-playbook site.yml              # use gather_facts: false + raw/script""")
+# The raw/inv helpers live in ~/.bashrc, which only an interactive bash reads -
+# a headless piped shell (gluekube_ssh ... --ansible <<< "...") never defines
+# them, so only advertise them when stdin is a TTY.
+if sys.stdin.isatty():
+    print("Helpers: raw <group> <cmd...>  (e.g. raw workers uptime)   inv  (inventory graph)")
 if os.environ.get("GLUEKUBE_WORK_MOUNTED") == "1":
     print("Your working directory is mounted read-write at /work (the current dir).")
 print("Type exit to leave.")
@@ -78,5 +93,10 @@ for var in ("AUTOGLUE_API_KEY", "GLUEKUBE_BOOTSTRAP_PY", "GLUEKUBE_INVENTORY_YML
             "GLUEKUBE_SSH_CONFIG", "GLUEKUBE_ANSIBLE_CFG"):
     os.environ.pop(var, None)
 os.environ["ANSIBLE_CONFIG"] = os.path.join(home, ".ansible.cfg")
+# CPython ignores SIGPIPE (SIG_IGN), and that disposition survives exec - so the
+# exec'd bash and its children would print spurious "Broken pipe" errors instead
+# of dying silently in pipelines like `grep -r x /work | head`. Restore default.
+import signal
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 sys.stdout.flush()
 os.execvp("bash", ["bash"])

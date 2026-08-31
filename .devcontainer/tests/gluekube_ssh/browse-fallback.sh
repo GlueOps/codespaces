@@ -22,11 +22,16 @@ MENULOG=$(mktemp)   # every menu gum choose was offered
 APILOG=$(mktemp)    # every api_call made
 CNT=$(mktemp)       # gum choose call counter (file-based: stubs run in subshells)
 OUT=$(mktemp)
-cleanup() { rm -f "$MENULOG" "$APILOG" "$CNT" "$OUT"; }
+READLOG=$(mktemp)   # every press-any-key `read` pause
+cleanup() { rm -f "$MENULOG" "$APILOG" "$CNT" "$OUT" "$READLOG"; }
 trap cleanup EXIT
 
 clear() { :; }
 gh() { echo "$GH_REPOS"; }
+# Record the press-any-key pause. Shadowing the `read` builtin lets us assert
+# the pause actually ran (the real fix): the message alone is not enough - the
+# org menu's next `clear` wipes it unless the pause holds the screen first.
+read() { echo "read $*" >> "$READLOG"; }
 gum() {
     case "$1" in
         style) echo "${@: -1}" ;;
@@ -44,7 +49,7 @@ api_call() {
     esac
 }
 
-reset_scenario() { : > "$MENULOG"; : > "$APILOG"; echo -1 > "$CNT"; : > "$OUT"; }
+reset_scenario() { : > "$MENULOG"; : > "$APILOG"; echo -1 > "$CNT"; : > "$OUT"; : > "$READLOG"; }
 
 pass=0; fail=0
 check() { # <desc> <extended-regex expected in file> <file>
@@ -66,20 +71,9 @@ browse_infrastructure > "$OUT" 2>&1 <<< "x"
 check_eq "returns cleanly" "$?" "0"
 check "no-clusters message shown" "No clusters found in organization 'acme'" "$OUT"
 check_eq "message shown exactly once" "$(grep -cE "No clusters found in organization 'acme'" "$OUT")" "1"
-# The real fix is the PAUSE: without it the org menu's clear wipes the message.
-# The read's -p prompt only prints when stdin is a tty, so it can't be asserted
-# on text; instead hold stdin open for ~1s and require the run to take that
-# long - the old no-pause code returned in milliseconds.
-start_ms=$(date +%s%3N)
-ANSWERS=("acme" "◀ Back")
-echo -1 > "$CNT"
-sleep 1 | browse_infrastructure > "$OUT" 2>&1
-elapsed_ms=$(( $(date +%s%3N) - start_ms ))
-if (( elapsed_ms >= 900 )); then
-    pass=$((pass+1))
-else
-    fail=$((fail+1)); echo "  FAIL: pauses at the message while stdin is open (took ${elapsed_ms}ms, want >=900)"
-fi
+# The real fix is the PAUSE (read stub records it): without it the org menu's
+# next clear wipes the message. Deterministic - fails if the pause is removed.
+check "pauses (press-any-key) before returning" "^read " "$READLOG"
 
 ##### B. no repos, clusters in AutoGlue: fallback populates the menu #####
 echo "##### B. fallback: AutoGlue clusters populate the menu #####"

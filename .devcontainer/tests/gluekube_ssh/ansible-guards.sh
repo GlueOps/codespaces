@@ -24,7 +24,10 @@ cleanup() { rm -f "$DOCKERLOG" "$OUT"; }
 trap cleanup EXIT
 
 gum() { echo "${@: -1}"; }
-docker() { echo "docker $1" >> "$DOCKERLOG"; }
+# Log the FULL argv (not just $1) so the generated inventory - passed as
+# -e GLUEKUBE_INVENTORY_YML=<json> - can be asserted offline; the only other
+# coverage of inventory content lives in the skippable docker integration test.
+docker() { printf '%s\n' "docker $*" >> "$DOCKERLOG"; }
 
 good_cluster() { # <bastion public_ip_address>
     printf '{"bastion_server":{"hostname":"bastion","public_ip_address":"%s","ssh_key_id":"k1"},"node_pools":[{"servers":[{"role":"master","hostname":"master-1","status":"ready","private_ip_address":"10.0.0.11","ssh_key_id":"k2"}]}]}' "$1"
@@ -33,6 +36,9 @@ good_cluster() { # <bastion public_ip_address>
 pass=0; fail=0
 check() { # <desc> <extended-regex expected in file> <file>
     if grep -qE "$2" "$3"; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL: $1 (missing: $2)"; fi
+}
+check_absent() { # <desc> <extended-regex that must NOT appear> <file>
+    if grep -qE "$2" "$3"; then fail=$((fail+1)); echo "  FAIL: $1 (unexpected: $2)"; else pass=$((pass+1)); fi
 }
 check_eq() { # <desc> <actual> <expected>
     if [[ "$2" == "$3" ]]; then pass=$((pass+1)); else fail=$((fail+1)); echo "  FAIL: $1 (got '$2', want '$3')"; fi
@@ -60,6 +66,26 @@ echo "##### G3 sane inputs reach docker run #####"
 ansible_shell_mode "$(good_cluster "203.0.113.10")" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
 check_eq "succeeds (rc=0)" "$?" "0"
 check "docker run invoked" "docker run" "$DOCKERLOG"
+check "API key passed name-only (not in argv value)" "[-]e AUTOGLUE_API_KEY( |$)" "$DOCKERLOG"
+check "tmpfs mount for ~/.ssh" "[-]-tmpfs /home/ansible/.ssh" "$DOCKERLOG"
+
+##### G4 node inventory: injection IP dropped, groups + ProxyJump present #####
+echo "##### G4 inventory content: injection dropped, groups intact #####"
+: > "$DOCKERLOG"
+# bastion + cluster name are clean (pass the guards); the WORKER carries a
+# Jinja2-injection private_ip that the inventory jq must drop, while the real
+# bastion (role-'bastion' node also present) must survive as its own group.
+inj_cluster='{"bastion_server":{"hostname":"real-bastion","public_ip_address":"203.0.113.10","ssh_key_id":"k1"},"node_pools":[{"servers":[
+  {"role":"master","hostname":"m1","status":"ready","private_ip_address":"10.0.0.11","ssh_key_id":"k2"},
+  {"role":"worker","hostname":"evil","status":"ready","private_ip_address":"{{ lookup(1) }}","ssh_key_id":"k2"},
+  {"role":"bastion","hostname":"fake-bastion","status":"ready","private_ip_address":"10.0.0.99","ssh_key_id":"k2"}]}]}'
+ansible_shell_mode "$inj_cluster" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
+check_eq "succeeds (rc=0)" "$?" "0"
+check "masters group present" '"masters"' "$DOCKERLOG"
+check "ProxyJump through the bastion set" "ProxyJump=cluster@203.0.113.10" "$DOCKERLOG"
+check "real bastion survives as a host" "real-bastion" "$DOCKERLOG"
+check_absent "injection IP dropped from inventory" "lookup" "$DOCKERLOG"
+check_absent "role-bastion node cannot hide real bastion" "fake-bastion" "$DOCKERLOG"
 
 echo "ansible-guards.sh: $((pass + fail)) assertions, FAILS=$fail"
 exit $(( fail > 0 ? 1 : 0 ))
