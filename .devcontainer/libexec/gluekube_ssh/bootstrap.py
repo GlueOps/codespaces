@@ -50,10 +50,13 @@ with open(os.path.join(home, ".ansible.cfg"), "w") as f:
 # while the nodes rode the connection the burst eventually established.
 # With the socket already up, a whole run costs ONE connection to the bastion.
 # Best-effort: if it fails, ssh falls back to dialing per connection as before.
+# An empty GLUEKUBE_BASTION_HOST means the caller disabled multiplexing
+# (GLUEKUBE_SSH_NO_MUX=1); there is no shared socket to pre-warm then.
+prewarm_host = os.environ.get("GLUEKUBE_BASTION_HOST", "")
 prewarm = subprocess.run(
     ["ssh", "-fN", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-     "cluster@" + os.environ["GLUEKUBE_BASTION_HOST"]],
-    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+     "cluster@" + prewarm_host],
+    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) if prewarm_host else None
 
 # Shell niceties: cluster name in the prompt (red = prod endpoint, green =
 # nonprod, mirroring get_gh_org's endpoint test) + terminal title + helpers.
@@ -82,7 +85,7 @@ counts = "  ".join("%s(%d)" % (g, len(v.get("hosts", {})))
 print()
 print("GlueKube Ansible shell - %s" % os.environ.get("GLUEKUBE_CLUSTER_NAME", "?"))
 print("Groups: %s" % counts)
-if prewarm.returncode != 0:
+if prewarm is not None and prewarm.returncode != 0:
     print("NOTE: could not pre-open the shared bastion connection (%s);"
           % (prewarm.stderr.decode(errors="replace").strip().splitlines() or ["unknown"])[-1])
     print("      runs still work, but each one dials the bastion more often.")

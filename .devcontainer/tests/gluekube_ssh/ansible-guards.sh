@@ -19,8 +19,8 @@ API_ENDPOINT="https://stub.invalid/api/v1"
 API_KEY="stub"
 export GLUEKUBE_SSH_LIBEXEC="$PWD/.devcontainer/libexec/gluekube_ssh"
 
-DOCKERLOG=$(mktemp); OUT=$(mktemp); INVOUT=$(mktemp)
-cleanup() { rm -f "$DOCKERLOG" "$OUT" "$INVOUT"; }
+DOCKERLOG=$(mktemp); OUT=$(mktemp); INVOUT=$(mktemp); CFGOUT=$(mktemp)
+cleanup() { rm -f "$DOCKERLOG" "$OUT" "$INVOUT" "$CFGOUT"; }
 trap cleanup EXIT
 
 gum() { echo "${@: -1}"; }
@@ -31,8 +31,12 @@ docker() {
     printf '%s\n' "docker $*" >> "$DOCKERLOG"
     # Also stash the generated inventory on its own so assertions can use jq
     # instead of grepping a multi-line argv blob.
+    # Same for the generated ssh config: asserting on the whole argv would also
+    # match the bootstrap's own SOURCE (passed as an env var), whose comments
+    # mention ControlMaster - a false match that hides a real regression.
     local a; for a in "$@"; do
         [[ "$a" == GLUEKUBE_INVENTORY_YML=* ]] && printf '%s' "${a#GLUEKUBE_INVENTORY_YML=}" > "$INVOUT"
+        [[ "$a" == GLUEKUBE_SSH_CONFIG=* ]] && printf '%s' "${a#GLUEKUBE_SSH_CONFIG=}" > "$CFGOUT"
     done
     return 0  # the loop's last test is usually false; don't leak that as a docker failure
 }
@@ -122,6 +126,21 @@ check "case-variant worker kept (roles merged)" "w-upper" "$DOCKERLOG"
 check "lower-case worker kept" "w-lower" "$DOCKERLOG"
 check_absent "non-string IP server dropped" "numeric-ip" "$DOCKERLOG"
 check_absent "trailing-newline IP server dropped" "trailing-nl" "$DOCKERLOG"
+
+
+##### G6 GLUEKUBE_SSH_NO_MUX=1 disables every user of the shared socket #####
+echo "##### G6 kill switch turns multiplexing off everywhere #####"
+: > "$DOCKERLOG"; : > "$INVOUT"; : > "$CFGOUT"
+GLUEKUBE_SSH_NO_MUX=1 ansible_shell_mode "$(good_cluster "203.0.113.10")" org-1 "prod.acme" > "$OUT" 2>&1 </dev/null
+check_eq "still succeeds (rc=0)" "$?" "0"
+check "warns that multiplexing is off" "multiplexing disabled" "$OUT"
+check_eq "no ControlPath in the bastion group" \
+    "$(jq -r '.all.children.bastions.vars.ansible_ssh_common_args // ""' "$INVOUT" | grep -c 'ControlPath')" "0"
+check_absent "no ControlMaster block in ssh_config" "ControlMaster" "$CFGOUT"
+# Empty bastion host is how the bootstrap is told to skip the pre-warm.
+check "pre-warm disabled via empty bastion host" "GLUEKUBE_BASTION_HOST= " "$DOCKERLOG"
+# Nodes still need the jump: the switch must not strand them.
+check "nodes keep their ProxyJump" "ProxyJump=cluster@203.0.113.10" "$DOCKERLOG"
 
 echo "ansible-guards.sh: $((pass + fail)) assertions, FAILS=$fail"
 exit $(( fail > 0 ? 1 : 0 ))
