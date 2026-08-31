@@ -83,7 +83,15 @@ check "key files are 0600"             '600 .*gluekube_0'
 check "key content came from the API"  'BEGIN FAKE key-bastion'
 check "ssh dir is tmpfs"               '^tmpfs '
 check "API key scrubbed from shell"    'api key scrubbed'
-check "cwd is the /work mount"         '^/work$'
+# The /work mount is gated on the caller's cwd being under /workspaces (the only
+# paths a CDE's host docker daemon shares). On CI runners the checkout lives
+# elsewhere, so the gate correctly skips the mount - assert whichever side of
+# the contract applies here.
+if [[ "$PWD" == /workspaces/* ]]; then
+    check "cwd is the /work mount"     '^/work$'
+else
+    check "no /work mount outside /workspaces" '^/home/ansible$'
+fi
 check "PS1 carries the cluster name"   'PS1=.*nonprod\.test\.onglueops\.com'
 check "raw helper is a function"       '^function$'
 check "inv helper is an alias"         '^alias$'
