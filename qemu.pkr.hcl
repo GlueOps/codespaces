@@ -33,10 +33,18 @@ source "qemu" "qemu-amd64" {
 build {
   sources = ["source.qemu.qemu-amd64"]
 
+  # vm/ holds the files vm/observability.sh installs (collector config, systemd drop-in, node exporter defaults).
+  # Uploaded as a directory into /tmp, so the scripts below find them at /tmp/vm.
+  provisioner "file" {
+    source      = "vm"
+    destination = "/tmp"
+  }
+
   provisioner "shell" {
     scripts = [
       "os-setup-start.sh",
       "developer-setup.sh",
+      "vm/observability.sh",
       "os-setup-finish.sh",
     ]
     environment_vars = [
