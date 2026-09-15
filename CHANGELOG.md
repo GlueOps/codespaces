@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.162.0](https://github.com/GlueOps/codespaces/compare/v0.161.1...v0.162.0) (2026-09-15)
+
+
+### Features
+
+* update packer to v1.12.0 #minor ([#596](https://github.com/GlueOps/codespaces/issues/596)) ([2129161](https://github.com/GlueOps/codespaces/commit/2129161273a2d14bde665584ee48f8e24b67ea3d))
+* update packer to v1.13.1 #minor ([#597](https://github.com/GlueOps/codespaces/issues/597)) ([90e2ebe](https://github.com/GlueOps/codespaces/commit/90e2ebe6102185aff21b30daf868f7a89d379217))
+* update packer to v1.14.3 #minor ([#598](https://github.com/GlueOps/codespaces/issues/598)) ([3ac4e0d](https://github.com/GlueOps/codespaces/commit/3ac4e0d5965b84ea97e8708dfded8e70567eb4e4))
+* update packer to v1.15.4 #minor ([#599](https://github.com/GlueOps/codespaces/issues/599)) ([ef6344d](https://github.com/GlueOps/codespaces/commit/ef6344d5297da8220c8d6c0ce8d6b0d48f431863))
+* update packer to v1.16.0 #minor ([#600](https://github.com/GlueOps/codespaces/issues/600)) ([d8b7316](https://github.com/GlueOps/codespaces/commit/d8b7316d98421cfcdb5b9554dd0266a5fa50b158))
+
 ## [0.161.1](https://github.com/GlueOps/codespaces/compare/v0.161.0...v0.161.1) (2026-08-31)
 
 
