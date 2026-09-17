@@ -11,9 +11,9 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:81380e4c9
 
 
 # renovate: datasource=github-tags depName=kubernetes/kubectl
-ARG VERSION_KUBECTL=1.34.6
+ARG VERSION_KUBECTL=1.34.11
 # renovate: datasource=github-tags depName=opentofu/opentofu
-ARG VERSION_OPENTOFU=1.11.13
+ARG VERSION_OPENTOFU=1.11.14
 # renovate: datasource=github-tags depName=helm/helm
 ARG VERSION_HELM=3.21.4
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
@@ -25,11 +25,11 @@ ARG VERSION_TERRAFORM_DOCS=0.24.0
 # renovate: datasource=github-tags depName=doitintl/kube-no-trouble
 ARG VERSION_KUBENT=0.7.3
 # renovate: datasource=github-tags depName=databus23/helm-diff
-ARG VERSION_HELM_DIFF=3.15.11
+ARG VERSION_HELM_DIFF=3.15.13
 # renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
-ARG VERSION_ARGO_CD_CLI=3.4.7
+ARG VERSION_ARGO_CD_CLI=3.4.9
 # renovate: datasource=github-tags depName=k3d-io/k3d
 ARG VERSION_K3D=5.9.0
 # renovate: datasource=github-tags depName=hashicorp/packer
@@ -37,9 +37,9 @@ ARG VERSION_HASHICORP_PACKER=1.15.4
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
 ARG VERSION_KREW=0.5.0
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG VERSION_CLAUDE_CODE=2.1.234
+ARG VERSION_CLAUDE_CODE=2.1.274
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
-ARG VERSION_CLOUDFLARED=2026.8.2
+ARG VERSION_CLOUDFLARED=2026.8.3
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -173,7 +173,7 @@ ENV PATH=/home/vscode/.krew/bin:$PATH
 
 RUN curl -L https://nixos.org/nix/install | bash -s -- --no-daemon
 # 0.14.0 came out a couple weeks ago and it appears to be problematic. So pinning and manually upgrading seems like a good option
-ENV DEVBOX_USE_VERSION=0.13.0
+ENV DEVBOX_USE_VERSION=0.13.7
 RUN curl -fsSL https://get.jetify.com/devbox | bash -s -- -f
 
 # Install Claude Code via the native (nodeless) installer into ~/.local/bin, which is already on PATH.
