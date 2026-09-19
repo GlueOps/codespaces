@@ -27,7 +27,7 @@ ARG VERSION_KUBENT=0.7.3
 # renovate: datasource=github-tags depName=databus23/helm-diff
 ARG VERSION_HELM_DIFF=3.15.13
 # renovate: datasource=github-tags depName=charmbracelet/gum
-ARG VERSION_CHARM_GUM=0.17.0
+ARG VERSION_CHARM_GUM=2.0.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
 ARG VERSION_ARGO_CD_CLI=3.4.9
 # renovate: datasource=github-tags depName=k3d-io/k3d
