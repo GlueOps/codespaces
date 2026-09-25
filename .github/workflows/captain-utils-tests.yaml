@@ -46,5 +46,5 @@ jobs:
           helm version && kubectl version --client
       - name: crds-kind.sh
         env:
-          CRDS_KIND_NODE_IMAGE: kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256
+          CRDS_KIND_NODE_IMAGE: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
         run: bash .devcontainer/tests/captain_utils/crds-kind.sh
