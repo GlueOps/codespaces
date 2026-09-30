@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.162.1](https://github.com/GlueOps/codespaces/compare/v0.162.0...v0.162.1) (2026-09-30)
+
+
+### Miscellaneous Chores
+
+* **patch:** update rlespinasse/github-slug-action to v5.7.1 #patch ([#609](https://github.com/GlueOps/codespaces/issues/609)) ([e41e2d6](https://github.com/GlueOps/codespaces/commit/e41e2d6b219cad2b750063f52c554f2f68cf1c72))
+
 ## [0.162.0](https://github.com/GlueOps/codespaces/compare/v0.161.1...v0.162.0) (2026-09-18)
 
 
