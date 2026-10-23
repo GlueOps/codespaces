@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.163.0](https://github.com/GlueOps/codespaces/compare/v0.162.0...v0.163.0) (2026-10-23)
+
+
+### Features
+
+* update cloudflare/cloudflared to 2026.9.1 #minor ([#611](https://github.com/GlueOps/codespaces/issues/611)) ([09bad84](https://github.com/GlueOps/codespaces/commit/09bad841f794f91787143988d5931f6eabbd88b6))
+* update kindest/node to v1.35.8 #minor ([#576](https://github.com/GlueOps/codespaces/issues/576)) ([48aaf12](https://github.com/GlueOps/codespaces/commit/48aaf1277240b91c424c0b8ba15cb653cb721f08))
+* update kubernetes-sigs/kind to v0.33.0 #minor ([#608](https://github.com/GlueOps/codespaces/issues/608)) ([da7d6f7](https://github.com/GlueOps/codespaces/commit/da7d6f79dd286a4f8b19344cf7a1f73d40ee0dbb))
+
+
+### Miscellaneous Chores
+
+* **fallback:** update docker/login-action ([#615](https://github.com/GlueOps/codespaces/issues/615)) ([a650d8e](https://github.com/GlueOps/codespaces/commit/a650d8ef81ec9d5c9d7830a0ede08ddd9134aaae))
+* **patch:** update packer to v1.16.1 #patch ([#614](https://github.com/GlueOps/codespaces/issues/614)) ([2eae3a5](https://github.com/GlueOps/codespaces/commit/2eae3a5e71764e8cd8c853b65569927d37250ed5))
+* **patch:** update rlespinasse/github-slug-action to v5.7.1 #patch ([#609](https://github.com/GlueOps/codespaces/issues/609)) ([e41e2d6](https://github.com/GlueOps/codespaces/commit/e41e2d6b219cad2b750063f52c554f2f68cf1c72))
+
 ## [0.162.0](https://github.com/GlueOps/codespaces/compare/v0.161.1...v0.162.0) (2026-09-18)
 
 
