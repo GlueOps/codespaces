@@ -42,9 +42,10 @@ done
 chmod 755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/dev
 
 scripts=(/usr/local/lib/codespace/common.sh /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/dev)
-echo "== bash -n"; bash -n developer-setup.sh "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh
+echo "== bash -n"
+for f in developer-setup.sh "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh hack/vm-recovery-test.sh; do bash -n "$f"; done
 echo "== shellcheck $(shellcheck --version | awk '/^version:/{print $2}')"
-shellcheck -S warning -s bash "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh
+shellcheck -S warning -s bash "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh hack/vm-recovery-test.sh
 
 groupadd -f docker
 useradd -m -u 1337 -G docker -s /bin/bash vscode

@@ -122,7 +122,7 @@ To test a `pre-release` you will first to do the following:
 2) In the nonprod slack channel for the developer workspaces (e.g. `#testing-developer-workspaces`) run `!vm` and you should see the `pre-release` tag.
 3) Select the `pre-release` tag. The VM starts the codespace from that tag by itself; log in and run `dev` to see it.
 4) To try a different image tag on that VM: `export ENVIRONMENT=nonprod`, then `dev reset` and pick the tag. This deletes the container and its home and `/nix` volumes.
-5) Before promoting the `pre-release`, run `hack/vm-recovery-test.sh root@<vm>` against a nonprod VM created this way (one with a token and one without): it kills the editor, the tunnel and the container, restarts docker and tailscaled, and reboots, and checks the codespace comes back each time. Also check the first boot: the URL from Slack should work a few minutes after the VM is created, without logging in.
+5) Before promoting the `pre-release`, run `hack/vm-recovery-test.sh root@<vm>` against a nonprod VM created this way (one with a token and one without; on the one without, finish the device login first: the code is in `dev status`): it kills the editor, the tunnel and the container, restarts docker and tailscaled, and reboots, and checks the codespace comes back each time. Also check the first boot: the URL from Slack should work a few minutes after the VM is created, without logging in.
 
 
 # Local Dev / Running packer locally:

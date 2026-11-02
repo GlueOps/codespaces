@@ -48,7 +48,9 @@ Settled; reviewers shouldn't re-raise these.
 - The sish tunnel keeps `StrictHostKeyChecking=no` with `UserKnownHostsFile=/dev/null`: sish host keys may change.
 - serve-web listens on 127.0.0.1 only; nobody uses :8000 on the tailnet IP.
 - A code-tunnel login that's waiting is shown by `dev status` and `docker logs`, with no more than that.
-- `dev` keeps the `dev` tmux session (windows `logs` and `shell`) for people who log in.
+- `dev` keeps the `dev` tmux session (windows `logs` and `shell`) for people who log in. In browser-editor mode the
+  `logs` window follows the unit journals; the container's own output is a `docker logs codespace` hint in `dev status`.
+- Free disk space in `dev status` is information only; it doesn't make the codespace unhealthy.
 - Accepted edge cases, not fixed:
   - `dev reset` doesn't wait for an ensure run already in progress.
   - `dev reset` with no terminal just refuses to run; there's no `--yes` flag.

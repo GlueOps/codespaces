@@ -41,8 +41,10 @@ for flag in "--restart unless-stopped" "-v /var/run/tailscale:/var/run/tailscale
 done
 if grep -q -- '--host 127.0.0.1' "$STATE/cmd" && grep -q -- '--connection-token-file /etc/glueops/cde_token' "$STATE/cmd"; then
     pass "  token: main process is serve-web on 127.0.0.1 with the token file"
+    if grep -qF -- '--connection-token-file /etc/glueops/cde_token > /dev/null' "$STATE/cmd"; then pass "  serve-web stdout (it prints the token) is discarded"; else fail "  serve-web stdout (it prints the token) is discarded"; fi
 else fail "  token: main process is serve-web on 127.0.0.1 with the token file ($(cat "$STATE/cmd"))"; fi
 expect_call "  runs cde-boot after create" "docker exec --env-file /etc/glueops/codespace.env codespace"
+if grep -qF "CDE-BOOT-OUTPUT" <<< "$out"; then fail "  cde-boot output kept out of the journal"; else pass "  cde-boot output kept out of the journal"; fi
 expect_call "  starts the tunnel when a token exists" "systemctl start --no-block codespace-tunnel.service"
 
 reset_state
@@ -102,6 +104,9 @@ if grep -qF "https://testvm.regional.example.com" <<< "$out"; then pass "  print
 state http 000
 run dev status
 expect_rc "status, editor not answering: unhealthy" 1
+rm "$STATE/http" "$STATE/tunnel_active"
+run dev status
+expect_rc "status, tunnel down: unhealthy" 1
 reset_state
 run dev status
 expect_rc "status, container missing: unhealthy" 1

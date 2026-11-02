@@ -22,7 +22,7 @@ echo "Installing other requirements now"
 
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
-# live-restore: restarting or upgrading dockerd leaves the codespace running. local driver: rotated logs.
+# live-restore: restarting dockerd (or a patch upgrade) leaves the codespace running. local driver: rotated logs.
 sudo mkdir -p /etc/docker && echo '{"mtu": 1400, "log-driver": "local", "log-opts": {"max-size": "10m", "max-file": "3"}, "live-restore": true}' | sudo tee /etc/docker/daemon.json > /dev/null && sudo systemctl restart docker
 sudo apt-get update --error-on=any
 sudo apt install tmux jq figlet qemu-guest-agent incus-agent ripgrep -y
@@ -77,9 +77,6 @@ gum --version
 # Everything the VM needs to keep the codespace running is embedded below, so the break-glass
 # `curl setup.glueops.dev | bash` path stays a single file. Each file has its own quoted heredoc
 # delimiter: the scripts contain heredocs of their own, and quoting keeps them uninterpolated here.
-#   codespace-ensure   starts the codespace container, creating it if missing (root; boot + every minute)
-#   codespace-tunnel   the sish reverse tunnel for the browser editor (vscode; restarted on exit)
-#   dev                what people type: check/repair, status, logs, reset, and the `dev` tmux session
 sudo install -d -m 0755 /usr/local/lib/codespace /etc/glueops
 
 sudo tee /usr/local/lib/codespace/common.sh > /dev/null <<'CODESPACE_COMMON_EOF'
@@ -138,7 +135,7 @@ create() {
     local tag gid image
     tag="$(tr -d '[:space:]' < "$CODESPACE_TAG_FILE" 2> /dev/null || true)"
     if [ -z "$tag" ]; then
-        echo "no image tag in $CODESPACE_TAG_FILE; run: dev reset" >&2
+        echo "no image tag in $CODESPACE_TAG_FILE; write one there (e.g. v0.163.0)" >&2
         exit 1
     fi
     image="$CODESPACE_IMAGE_REPO:$tag"
@@ -278,7 +275,7 @@ status() {
     [ -n "$err" ] && echo "             error: $err"
     if [ "$running" != true ] || [ "$state" = restarting ]; then
         healthy=1
-        echo "             if it stays down: dev reset (deletes the container and its volumes)"
+        echo "             why: docker logs codespace    if it stays down: dev reset (deletes the container and its volumes)"
     fi
 
     case "$(codespace_mode)" in
@@ -288,7 +285,7 @@ status() {
             if [ "$http" != 000 ] && [ -n "$http" ]; then
                 echo "  editor     up (127.0.0.1:8000)"
             else
-                echo "  editor     not answering on 127.0.0.1:8000"
+                echo "  editor     not answering on 127.0.0.1:8000  (docker logs codespace)"
                 healthy=1
             fi
             if systemctl is-active --quiet codespace-tunnel.service; then
@@ -358,7 +355,13 @@ update_notice() {
 }
 
 logs() {
-    trap 'echo; echo "(Ctrl-C does not stop anything here; detach from tmux with Ctrl-b d)"' INT
+    # In the tmux `logs` window, Ctrl-C must not close the window; anywhere else it stops dev logs. The
+    # explicit exit is needed: docker logs exits cleanly on SIGINT, so bash wouldn't stop on its own.
+    if [ -n "${DEV_LOGS_WINDOW:-}" ]; then
+        trap 'echo; echo "(Ctrl-C does not stop anything here; detach from tmux with Ctrl-b d)"' INT
+    else
+        trap 'exit 130' INT
+    fi
     local since="" last_start="" info running started
     while :; do
         case "$(codespace_mode)" in
@@ -375,15 +378,15 @@ logs() {
                     docker logs -f --since "$since" "$CODESPACE_NAME" 2>&1 || true
                     since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
                 else
-                    sleep 5
+                    sleep 5 || true
                 fi
                 ;;
             missing)
                 echo "$(date +%T) no codespace container yet; codespace-ensure creates it"
-                sleep 10
+                sleep 10 || true
                 ;;
         esac
-        sleep 2
+        sleep 2 || true
     done
 }
 
@@ -407,14 +410,15 @@ reset() {
     docker rm -f "$CODESPACE_NAME" > /dev/null 2>&1 || true
     docker volume rm codespace-home codespace-nix > /dev/null 2>&1 || true
     [ -n "$tag" ] && echo "$tag" | sudo tee "$CODESPACE_TAG_FILE" > /dev/null
-    sudo systemctl start codespace-ensure.timer
+    # ensure_now first: restarting the timer fires a run at once, before ensure_now could start watching it.
     ensure_now
+    sudo systemctl start codespace-ensure.timer
 }
 
 tmux_session() {
     # One chained command: if two `dev`s race, the second fails on "duplicate session" and adds nothing.
     tmux has-session -t =dev 2> /dev/null \
-        || tmux new-session -d -s dev -n logs "dev status; dev logs" \; new-window -d -t =dev -n shell \
+        || tmux new-session -d -s dev -n logs "dev status; DEV_LOGS_WINDOW=1 dev logs" \; new-window -d -t =dev -n shell \
         || true
     if [ -n "${TMUX:-}" ]; then
         tmux switch-client -t =dev
@@ -525,7 +529,7 @@ if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   GLUEOPS_CODESPACES_CONTAINER_TAG=$(curl -fsSL "https://api.github.com/repos/GlueOps/codespaces/releases/latest" | jq -r '.tag_name')
 
   if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ] || [ "$GLUEOPS_CODESPACES_CONTAINER_TAG" == "null" ]; then
-    echo "WARNING: Failed to fetch latest release tag. The codespace won't start until a tag is set (dev reset)."
+    echo "WARNING: Failed to fetch latest release tag. The codespace won't start until a tag is written to /etc/glueops/codespace-tag."
     GLUEOPS_CODESPACES_CONTAINER_TAG=""
   else
     echo "Using latest release version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
@@ -552,10 +556,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 
 
-if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
-  echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
-  echo "Please manually run: docker pull ghcr.repo.gpkg.io/glueops/codespaces:<TAG> before you run 'dev'"
-else
+if [ -n "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
 

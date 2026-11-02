@@ -33,6 +33,7 @@ case "$1" in
     exec)
         case "$*" in
             *"tunnel status"*) get tunnel_status '{"tunnel":null}' ;;
+            *) echo "CDE-BOOT-OUTPUT may echo secrets" ;;
         esac
         ;;
     logs) get logs ;;
