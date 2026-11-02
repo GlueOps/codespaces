@@ -132,6 +132,9 @@ expect_call "  restarts the ensure timer" "systemctl start codespace-ensure.time
 ensure_line=$(calls | grep -nF "systemctl start codespace-ensure.service" | head -n1 | cut -d: -f1)
 timer_line=$(calls | grep -nF "systemctl start codespace-ensure.timer" | head -n1 | cut -d: -f1)
 if [ -n "$ensure_line" ] && [ "${timer_line:-0}" -gt "$ensure_line" ]; then pass "  restarts the timer after the ensure run"; else fail "  restarts the timer after the ensure run"; fi
+reset_state; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1; state kill_reset 1
+run script -qec "dev reset" /dev/null
+expect_call "reset killed during the create: still restarts the ensure timer" "systemctl start codespace-ensure.timer"
 
 # journalctl returning stands in for Ctrl-C: under sudo's use_pty, dev itself never gets the SIGINT.
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
