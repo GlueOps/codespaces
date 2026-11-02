@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "systemctl $* [as $(id -un)]" >> "$S/calls"
+case "$*" in
+    "is-active --quiet codespace-tunnel.service") [ -e "$S/tunnel_active" ] ;;
+    "is-active codespace-tunnel.service") if [ -e "$S/tunnel_active" ]; then echo active; else echo activating; exit 3; fi ;;
+    "show -p NRestarts --value codespace-tunnel.service") echo 0 ;;
+    *) exit 0 ;;
+esac

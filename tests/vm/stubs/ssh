@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "ssh $* [as $(id -un)]" >> "$S/calls"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "tmux $* [as $(id -un)]" >> "$S/calls"
+[ "$1" = has-session ] && exit 1
+exit 0

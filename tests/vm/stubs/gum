@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "gum $* [as $(id -un)]" >> "$S/calls"
+case "$1" in
+    choose) cat "$S/gum_choice" ;;
+    input) cat "$S/gum_input" ;;
+    confirm) exit 0 ;;
+esac
