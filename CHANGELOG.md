@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.163.0](https://github.com/GlueOps/codespaces/compare/v0.162.0...v0.163.0) (2026-11-02)
+
+
+### Features
+
+* **deps:** update dependency hashicorp/packer to v1.16.1 ([#565](https://github.com/GlueOps/codespaces/issues/565)) ([76a73ce](https://github.com/GlueOps/codespaces/commit/76a73ce82ce4a1fa8d1368abe1f34c226c78b193))
+* **deps:** update versions (Opentofu 1.11.14 - &gt; 1.12.11, argocd 3.4.9 ([d8dbc82](https://github.com/GlueOps/codespaces/commit/d8dbc82557039e521c151e002d022f00d27bdee1))
+* **deps:** update versions (Opentofu 1.11.14 - &gt; 1.12.11, argocd 3.4.9 -&gt; 3.4.12, claudecode 2.1.288 -&gt; 2.1.316) ([#620](https://github.com/GlueOps/codespaces/issues/620)) ([d8dbc82](https://github.com/GlueOps/codespaces/commit/d8dbc82557039e521c151e002d022f00d27bdee1))
+* update cloudflare/cloudflared to 2026.9.1 #minor ([#611](https://github.com/GlueOps/codespaces/issues/611)) ([09bad84](https://github.com/GlueOps/codespaces/commit/09bad841f794f91787143988d5931f6eabbd88b6))
+* update kindest/node to v1.35.8 #minor ([#576](https://github.com/GlueOps/codespaces/issues/576)) ([48aaf12](https://github.com/GlueOps/codespaces/commit/48aaf1277240b91c424c0b8ba15cb653cb721f08))
+* update kubernetes-sigs/kind to v0.33.0 #minor ([#608](https://github.com/GlueOps/codespaces/issues/608)) ([da7d6f7](https://github.com/GlueOps/codespaces/commit/da7d6f79dd286a4f8b19344cf7a1f73d40ee0dbb))
+
+
+### Bug Fixes
+
+* **devcontainer:** bump node to 22.23.4 for CVE-2026-111497 ([#617](https://github.com/GlueOps/codespaces/issues/617)) ([6263d96](https://github.com/GlueOps/codespaces/commit/6263d9617027ae21368eb687909072f15c95ced1))
+
+
+### Miscellaneous Chores
+
+* **fallback:** update docker/login-action ([#615](https://github.com/GlueOps/codespaces/issues/615)) ([a650d8e](https://github.com/GlueOps/codespaces/commit/a650d8ef81ec9d5c9d7830a0ede08ddd9134aaae))
+* **patch:** update packer to v1.16.1 #patch ([#614](https://github.com/GlueOps/codespaces/issues/614)) ([2eae3a5](https://github.com/GlueOps/codespaces/commit/2eae3a5e71764e8cd8c853b65569927d37250ed5))
+* **patch:** update rlespinasse/github-slug-action to v5.7.1 #patch ([#609](https://github.com/GlueOps/codespaces/issues/609)) ([e41e2d6](https://github.com/GlueOps/codespaces/commit/e41e2d6b219cad2b750063f52c554f2f68cf1c72))
+
+
+### Dependencies
+
+* update dependency @anthropic-ai/claude-code to v2.1.288 ([#603](https://github.com/GlueOps/codespaces/issues/603)) ([a273c2b](https://github.com/GlueOps/codespaces/commit/a273c2bc79d016c45840aed5acfc8e1867f2101e))
+* update dependency cloudflare/cloudflared to v2026.9.3 ([#616](https://github.com/GlueOps/codespaces/issues/616)) ([7468af4](https://github.com/GlueOps/codespaces/commit/7468af49277447be2e0093e1fbcf2bc0b40fd07e))
+* update dependency databus23/helm-diff to v3.15.15 ([#618](https://github.com/GlueOps/codespaces/issues/618)) ([05ccdfe](https://github.com/GlueOps/codespaces/commit/05ccdfe85b1198fb8cccd6f2d473d3779f56fc90))
+
 ## [0.162.0](https://github.com/GlueOps/codespaces/compare/v0.161.1...v0.162.0) (2026-09-18)
 
 
