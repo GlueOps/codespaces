@@ -323,9 +323,13 @@ status() {
     return "$healthy"
 }
 
+# Up to 30s for a codespace that is still starting. A tunnel waiting for its first login won't get
+# healthy by waiting, so stop there and show the device code.
 wait_healthy() {
+    local out
     for _ in $(seq 1 30); do
-        status > /dev/null && return 0
+        out="$(status)" && return 0
+        grep -q 'waiting for login' <<< "$out" && return 1
         sleep 1
     done
     return 1

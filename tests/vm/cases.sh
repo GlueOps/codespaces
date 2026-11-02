@@ -125,6 +125,14 @@ expect_call "  removes both volumes" "docker volume rm codespace-home codespace-
 if [ "$(cat /etc/glueops/codespace-tag)" = v8 ]; then pass "  nonprod: writes the picked tag"; else fail "  nonprod: writes the picked tag ($(cat /etc/glueops/codespace-tag))"; fi
 expect_call "  restarts the ensure timer" "systemctl start codespace-ensure.timer"
 
+reset_state; state container running; state cmd '["bash","-lc","exec code-tunnel tunnel --random-name"]'
+state tunnel_status '{"tunnel":{"name":null,"tunnel":"Disconnected"}}'
+echo 'To grant access to the server, please log into https://github.com/login/device and use code CCCC-3333' > "$STATE/logs"
+start=$SECONDS
+run script -qec dev /dev/null
+if [ $((SECONDS - start)) -lt 15 ]; then pass "TTY, waiting for login: shows the code without waiting for health"; else fail "TTY, waiting for login: took $((SECONDS - start))s"; fi
+if grep -qF "CCCC-3333" <<< "$out"; then pass "  prints the device code"; else fail "  prints the device code"; fi
+
 echo "== no output contains the token"
 if grep -qF "$TOKEN" <<< "$all_output$(cat "$STATE/calls")"; then fail "token value found in output"; else pass "token never printed"; fi
 
