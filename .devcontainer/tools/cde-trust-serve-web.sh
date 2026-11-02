@@ -22,8 +22,8 @@
 # it once (this is the same download that would happen on first connect, just moved earlier).
 #
 # WHERE THIS RUNS: (1) at IMAGE BUILD — .devcontainer/Dockerfile runs this and then asserts
-# the shim landed, so the build fails if it didn't; (2) at RUNTIME — developer-setup.sh's
-# `dev` calls it before `code serve-web` (a no-op when the baked server is already shimmed;
+# the shim landed, so the build fails if it didn't; (2) at RUNTIME — the codespace container's
+# main process (set by developer-setup.sh's codespace-ensure) runs it before serve-web (a no-op when the baked server is already shimmed;
 # re-shims if a VS Code update pulled a new server).
 #
 # ─────────────────────────────────────────────────────────────────────────────────────────
