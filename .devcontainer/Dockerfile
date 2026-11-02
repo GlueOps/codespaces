@@ -25,7 +25,7 @@ ARG VERSION_TERRAFORM_DOCS=0.24.0
 # renovate: datasource=github-tags depName=doitintl/kube-no-trouble
 ARG VERSION_KUBENT=0.7.3
 # renovate: datasource=github-tags depName=databus23/helm-diff
-ARG VERSION_HELM_DIFF=3.15.13
+ARG VERSION_HELM_DIFF=3.15.15
 # renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
@@ -39,7 +39,7 @@ ARG VERSION_KREW=0.5.0
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG VERSION_CLAUDE_CODE=2.1.288
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
-ARG VERSION_CLOUDFLARED=2026.9.1
+ARG VERSION_CLOUDFLARED=2026.9.3
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
