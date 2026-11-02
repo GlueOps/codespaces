@@ -13,7 +13,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:81380e4c9
 # renovate: datasource=github-tags depName=kubernetes/kubectl
 ARG VERSION_KUBECTL=1.34.11
 # renovate: datasource=github-tags depName=opentofu/opentofu
-ARG VERSION_OPENTOFU=1.11.14
+ARG VERSION_OPENTOFU=1.12.11
 # renovate: datasource=github-tags depName=helm/helm
 ARG VERSION_HELM=3.21.4
 # renovate: datasource=github-tags depName=kubernetes-sigs/kind
@@ -29,7 +29,7 @@ ARG VERSION_HELM_DIFF=3.15.15
 # renovate: datasource=github-tags depName=charmbracelet/gum
 ARG VERSION_CHARM_GUM=0.17.0
 # renovate: datasource=github-tags depName=argoproj/argo-cd
-ARG VERSION_ARGO_CD_CLI=3.4.9
+ARG VERSION_ARGO_CD_CLI=3.4.12
 # renovate: datasource=github-tags depName=k3d-io/k3d
 ARG VERSION_K3D=5.9.0
 # renovate: datasource=github-tags depName=hashicorp/packer
@@ -37,7 +37,7 @@ ARG VERSION_HASHICORP_PACKER=1.16.1
 # renovate: datasource=github-tags depName=kubernetes-sigs/krew
 ARG VERSION_KREW=0.5.0
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG VERSION_CLAUDE_CODE=2.1.288
+ARG VERSION_CLAUDE_CODE=2.1.316
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
 ARG VERSION_CLOUDFLARED=2026.9.3
 
