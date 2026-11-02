@@ -9,7 +9,7 @@ read -r -a ssh_opts <<< "${SSH_OPTS:-}"
 on() { ssh -o BatchMode=yes -o ConnectTimeout=10 "${ssh_opts[@]}" "$target" "$1"; }
 fails=0
 started() { on "docker container inspect -f '{{.State.StartedAt}}' codespace"; }
-# A fault that didn't happen would pass as "healthy after 0s"; each check confirms its fault first.
+# A fault that didn't happen would pass as "healthy after 0s"; each check then confirms its fault happened.
 changed() { # <label> <before> <after>
     if [ "$2" != "$3" ]; then return 0; fi
     echo "  FAIL $1: the fault didn't take effect"; fails=$((fails + 1)); return 1
@@ -44,7 +44,7 @@ on 'docker update --restart=unless-stopped codespace > /dev/null'
 if [ "$mode" = web ]; then
     before=$(on 'systemctl show -p NRestarts --value codespace-tunnel')
     on 'pkill -9 -f "^ssh -N -T"'
-    sleep 2
+    sleep 2 # let systemd see the ssh exit before polling health
     wait_healthy "tunnel ssh killed" 45
     changed "tunnel ssh killed" "$before" "$(on 'systemctl show -p NRestarts --value codespace-tunnel')"
 fi

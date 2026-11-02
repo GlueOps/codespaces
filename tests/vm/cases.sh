@@ -93,7 +93,7 @@ expect_no_call "no TTY: no tmux" "tmux"
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
 run script -qec dev /dev/null
 expect_call "TTY: blocking ensure start" "systemctl start codespace-ensure.service [as root]"
-expect_call "TTY: creates the dev tmux session" "tmux new-session -d -s dev -n logs"
+expect_call "TTY: creates the dev tmux session" "tmux new-session -d -s dev -n logs dev status; DEV_LOGS_WINDOW=1 dev logs"
 expect_call "TTY: attaches" "tmux attach -t =dev"
 
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
@@ -129,6 +129,16 @@ expect_call "  removes the container" "docker rm -f codespace"
 expect_call "  removes both volumes" "docker volume rm codespace-home codespace-nix"
 if [ "$(cat /etc/glueops/codespace-tag)" = v8 ]; then pass "  nonprod: writes the picked tag"; else fail "  nonprod: writes the picked tag ($(cat /etc/glueops/codespace-tag))"; fi
 expect_call "  restarts the ensure timer" "systemctl start codespace-ensure.timer"
+ensure_line=$(calls | grep -nF "systemctl start codespace-ensure.service" | head -n1 | cut -d: -f1)
+timer_line=$(calls | grep -nF "systemctl start codespace-ensure.timer" | head -n1 | cut -d: -f1)
+if [ -n "$ensure_line" ] && [ "${timer_line:-0}" -gt "$ensure_line" ]; then pass "  restarts the timer after the ensure run"; else fail "  restarts the timer after the ensure run"; fi
+
+# journalctl returning stands in for Ctrl-C: under sudo's use_pty, dev itself never gets the SIGINT.
+reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
+run timeout 10 dev logs
+expect_rc "logs, web mode, typed: stops when journalctl ends" 130
+run timeout 5 sudo -u vscode env DEV_LOGS_WINDOW=1 dev logs
+expect_rc "logs, web mode, tmux window: keeps following" 124
 
 reset_state; state container running; state cmd '["bash","-lc","exec code-tunnel tunnel --random-name"]'
 state tunnel_status '{"tunnel":{"name":null,"tunnel":"Disconnected"}}'

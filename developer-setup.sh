@@ -356,7 +356,8 @@ update_notice() {
 
 logs() {
     # In the tmux `logs` window, Ctrl-C must not close the window; anywhere else it stops dev logs. The
-    # explicit exit is needed: docker logs exits cleanly on SIGINT, so bash wouldn't stop on its own.
+    # explicit exits are needed: docker logs exits cleanly on SIGINT, so bash wouldn't stop on its own,
+    # and sudo's use_pty passes Ctrl-C only to journalctl, so bash never sees it.
     if [ -n "${DEV_LOGS_WINDOW:-}" ]; then
         trap 'echo; echo "(Ctrl-C does not stop anything here; detach from tmux with Ctrl-b d)"' INT
     else
@@ -367,6 +368,7 @@ logs() {
         case "$(codespace_mode)" in
             web)
                 sudo journalctl -f -n 30 -u codespace-tunnel.service -u codespace-ensure.service || true
+                [ -n "${DEV_LOGS_WINDOW:-}" ] || exit 130
                 ;;
             tunnel)
                 # The device code and tunnel link are on the container's stdout. docker logs -f exits
@@ -407,12 +409,13 @@ reset() {
     [ "$ENVIRONMENT" = nonprod ] && tag="$(pick_tag)"
     # Stop the timer first so codespace-ensure can't recreate the container from the old tag midway.
     sudo systemctl stop codespace-ensure.timer
+    # On exit, so a Ctrl-C during the (minutes-long) create doesn't leave the timer off until reboot. After
+    # ensure_now: restarting the timer fires a run at once, before ensure_now could start watching it.
+    trap 'sudo systemctl start codespace-ensure.timer' EXIT
     docker rm -f "$CODESPACE_NAME" > /dev/null 2>&1 || true
     docker volume rm codespace-home codespace-nix > /dev/null 2>&1 || true
     [ -n "$tag" ] && echo "$tag" | sudo tee "$CODESPACE_TAG_FILE" > /dev/null
-    # ensure_now first: restarting the timer fires a run at once, before ensure_now could start watching it.
     ensure_now
-    sudo systemctl start codespace-ensure.timer
 }
 
 tmux_session() {
