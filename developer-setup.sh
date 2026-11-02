@@ -148,6 +148,10 @@ create() {
     touch "$CODESPACE_ENV_FILE"
     chmod 600 "$CODESPACE_ENV_FILE"
 
+    # Home and /nix live in named volumes so a recreated container keeps dotfiles, logins and
+    # devbox/nix packages. Docker copies the image's content into each volume once, while it's empty;
+    # the two go together because the nix profile links in home point into /nix.
+
     # The main process is chosen once, at create time: the browser editor when the Slack bot wrote a
     # connection token, otherwise a VS Code tunnel that prints a GitHub device code to `docker logs`.
     # code-tunnel is called directly: the `code` wrapper adds a ~100MB Electron parent for nothing.
@@ -165,6 +169,7 @@ create() {
     docker run -d --name "$CODESPACE_NAME" --restart unless-stopped --init \
         --net=host --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --device=/dev/net/tun \
         -u "1337:$gid" -w /workspaces/glueops \
+        -v codespace-home:/home/vscode -v codespace-nix:/nix \
         -v /workspaces/glueops:/workspaces/glueops \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v /var/run/tailscale:/var/run/tailscale \
@@ -234,7 +239,7 @@ sudo tee /usr/local/bin/dev > /dev/null <<'CODESPACE_DEV_EOF'
 #   dev          make sure the codespace is up, show its status, open the `dev` tmux session
 #   dev status   print status; exit 0 if healthy, 1 if not
 #   dev logs     follow the codespace's logs (the `logs` window of the tmux session runs this)
-#   dev reset    delete the codespace container and its volumes and create it again
+#   dev reset    delete the codespace container and its home and /nix volumes, then create it again
 #                (with ENVIRONMENT=nonprod it asks which image tag to use)
 set -euo pipefail
 
@@ -390,12 +395,13 @@ pick_tag() {
 
 reset() {
     [ -t 0 ] && [ -t 1 ] || { echo "dev reset needs a terminal" >&2; exit 1; }
-    gum confirm "Delete the codespace container and create it again?" || exit 1
+    gum confirm "Delete the codespace container AND its home and /nix volumes, then create it again? Anything not pushed is lost." || exit 1
     local tag=""
     [ "$ENVIRONMENT" = nonprod ] && tag="$(pick_tag)"
     # Stop the timer first so codespace-ensure can't recreate the container from the old tag midway.
     sudo systemctl stop codespace-ensure.timer
     docker rm -f "$CODESPACE_NAME" > /dev/null 2>&1 || true
+    docker volume rm codespace-home codespace-nix > /dev/null 2>&1 || true
     [ -n "$tag" ] && echo "$tag" | sudo tee "$CODESPACE_TAG_FILE" > /dev/null
     sudo systemctl start codespace-ensure.timer
     ensure_now
