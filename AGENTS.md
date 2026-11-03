@@ -55,6 +55,9 @@ Settled; reviewers shouldn't re-raise these.
   wait so security releases reach new images quickly.
 - The browser editor runs with `--disable-telemetry`. `code tunnel` has no such flag; its users' own VS Code settings apply.
 - Credentials kept in the home volume survive a container recreate. `dev reset` removes them.
+- cloud-init uses `manual_cache_clean: true` (os-setup-finish.sh): it discovers its datasource on first boot only, so a
+  stop/start on libvirt/Proxmox (seed attached only at first boot) doesn't re-probe for ~6 min or regenerate host keys.
+  Accepted: a VM copied from an already-booted disk isn't re-initialised (`cloud-init clean` on the copy fixes that).
 - The sish tunnel keeps `StrictHostKeyChecking=no` with `UserKnownHostsFile=/dev/null`: sish host keys may change.
 - serve-web listens on 127.0.0.1 only; nobody uses :8000 on the tailnet IP.
 - A code-tunnel login that's waiting is shown by `dev status` and `docker logs`, with no more than that.

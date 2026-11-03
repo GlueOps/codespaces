@@ -18,10 +18,8 @@ printf 'policy: search,found=all,maybe=all,notfound=enabled\n' | sudo tee /etc/c
 # cosmetic "dsid_missing_source" warning on Incus (source was [], but LXD was used). Silence just that.
 printf 'warnings:\n  dsid_missing_source: off\n' | sudo tee /etc/cloud/cloud.cfg.d/99-warnings.cfg >/dev/null
 
-# The provisioner attaches the cidata seed only for the first boot (virt-install --cloud-init; Proxmox ejects
-# it). Without this, every later boot re-runs datasource discovery: ~6 min of probe timeouts, then cloud-init
-# falls back to DataSourceNone and treats the VM as new (SSH host keys regenerated). With it, cloud-init reuses
-# what it found on first boot; the cloud-init clean below still makes every new VM discover normally.
+# The cidata seed is attached only at first boot; without this, later boots re-probe datasources (~6 min), fall
+# back to DataSourceNone and act as a new instance (new SSH host keys). The cloud-init clean below resets new VMs.
 printf 'manual_cache_clean: true\n' | sudo tee /etc/cloud/cloud.cfg.d/99-manual-cache-clean.cfg >/dev/null
 
 echo "cleaning up"
