@@ -102,7 +102,9 @@ SH
 if ! server_present; then
     echo "cde-trust-serve-web: serve-web server not downloaded yet; front-loading it…"
     log="$(mktemp)"
-    timeout 240 code serve-web --accept-server-license-terms --without-connection-token \
+    # The server for the installed CLI's own commit ("code 1.144.1 (commit <sha>)"), not whatever is latest.
+    commit="$(/usr/share/code/bin/code-tunnel --version 2>/dev/null | sed -n 's/.*(commit \([0-9a-f]*\)).*/\1/p')"
+    timeout 240 code serve-web ${commit:+--commit-id "$commit"} --accept-server-license-terms --without-connection-token \
         --host 127.0.0.1 --port 0 >"$log" 2>&1 &
     dl=$!
     port=""

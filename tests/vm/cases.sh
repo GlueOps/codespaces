@@ -177,17 +177,19 @@ echo "== cde-trust-serve-web (the image's serve-web pre-bake)"
 # serve-web extracts into "<hash>.staging-<uuid>" and renames it when done; a staging dir must never
 # count as the server. The fake `code` stands in for that download: it creates the finished dir.
 th=/tmp/trust-home; tsw=$th/.vscode/cli/serve-web
-printf '#!/bin/sh\necho "Web UI available at http://127.0.0.1:9"\nmkdir -p "$HOME/.vscode/cli/serve-web/ddd444/bin"\nprintf "#!/bin/sh\\n" > "$HOME/.vscode/cli/serve-web/ddd444/bin/code-server"\nexec sleep 30\n' > /usr/local/bin/code
+printf '#!/bin/sh\necho "$*" > /tmp/trust-code-args\necho "Web UI available at http://127.0.0.1:9"\nmkdir -p "$HOME/.vscode/cli/serve-web/ddd444/bin"\nprintf "#!/bin/sh\\n" > "$HOME/.vscode/cli/serve-web/ddd444/bin/code-server"\nexec sleep 30\n' > /usr/local/bin/code
 chmod +x /usr/local/bin/code
 shimmed() { grep -q 'cde-trust-serve-web shim' "$tsw/$1/bin/code-server"; }
 rm -rf "$th"; mkdir -p "$tsw/aaa111/bin" "$tsw/bbb222.staging-0f0f/bin"
 for d in aaa111 bbb222.staging-0f0f; do printf '#!/bin/sh\n' > "$tsw/$d/bin/code-server"; done
 HOME=$th bash .devcontainer/tools/cde-trust-serve-web.sh > /dev/null 2>&1
 if shimmed aaa111 && ! shimmed bbb222.staging-0f0f; then pass "finished server shimmed, staging download left alone"; else fail "finished server shimmed, staging download left alone"; fi
-rm -rf "$th"; mkdir -p "$tsw/ccc333.staging-0f0f/bin"; printf '#!/bin/sh\n' > "$tsw/ccc333.staging-0f0f/bin/code-server"
+rm -rf "$th"; mkdir -p "$tsw/ccc333.staging-0f0f/bin" /usr/share/code/bin; printf '#!/bin/sh\n' > "$tsw/ccc333.staging-0f0f/bin/code-server"
+printf '#!/bin/sh\necho "code 1.0.0 (commit ddd444)"\n' > /usr/share/code/bin/code-tunnel; chmod +x /usr/share/code/bin/code-tunnel
 HOME=$th timeout 60 bash .devcontainer/tools/cde-trust-serve-web.sh > /dev/null 2>&1
 if shimmed ddd444 && ! shimmed ccc333.staging-0f0f; then pass "only a staging download: waits for the finished server and shims it"; else fail "only a staging download: waits for the finished server and shims it"; fi
-rm -rf "$th" /usr/local/bin/code
+if grep -q -- "serve-web --commit-id ddd444 " /tmp/trust-code-args; then pass "  downloads the server for the installed CLI's commit"; else fail "  downloads the server for the installed CLI's commit ($(cat /tmp/trust-code-args))"; fi
+rm -rf "$th" /usr/local/bin/code /usr/share/code /tmp/trust-code-args
 
 echo "== no output contains the token"
 if grep -qF "$TOKEN" <<< "$all_output$(cat "$STATE/calls")"; then fail "token value found in output"; else pass "token never printed"; fi
