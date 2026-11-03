@@ -30,8 +30,9 @@ a crash or an out-of-memory kill.
   A container you stop with `docker stop` is started again within a minute.
 - **`codespace-tunnel.service`** runs the sish reverse tunnel for the browser editor and reconnects whenever it drops.
 - Home (`/home/vscode`) and `/nix` are named volumes (`codespace-home`, `codespace-nix`), so a recreated container
-  keeps your dotfiles, logins and devbox packages. `/workspaces/glueops` is on the VM's disk. None of this survives
-  deleting the VM: commit and push.
+  keeps your dotfiles, logins and devbox packages. The image build fills them, so a new codespace starts quickly;
+  after `dev reset` the first start copies them again and takes a few minutes. `/workspaces/glueops` is on the VM's
+  disk. None of this survives deleting the VM: commit and push.
 
 When the editor process restarts (after an OOM kill, for example), the browser tab says it can't reconnect: reload the
 page. Terminals and anything else running inside the container are gone after a restart.

@@ -22,6 +22,7 @@ case "$1" in
         out=${out//\{\{json .Config.Cmd\}\}/$(get cmd '["bash"]')}
         echo "$out"
         ;;
+    volume) [ "$2" = inspect ] && [ -e "$S/no_volume" ] && { echo "Error response from daemon: get $3: no such volume" >&2; exit 1; } ;;
     start) echo running > "$S/container" ;;
     run)
         shift

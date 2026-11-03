@@ -46,6 +46,10 @@ else fail "  token: main process is serve-web on 127.0.0.1 with the token file (
 expect_call "  runs cde-boot after create" "docker exec --env-file /etc/glueops/codespace.env codespace"
 if grep -qF "CDE-BOOT-OUTPUT" <<< "$out"; then fail "  cde-boot output kept out of the journal"; else pass "  cde-boot output kept out of the journal"; fi
 expect_call "  starts the tunnel when a token exists" "systemctl start --no-block codespace-tunnel.service"
+if grep -q "first start" <<< "$out"; then fail "  volumes exist: no first-start note"; else pass "  volumes exist: no first-start note"; fi
+reset_state; state no_volume 1
+run codespace-ensure
+if grep -q "first start: copying" <<< "$out"; then pass "  new volumes: says the first start takes minutes"; else fail "  new volumes: says the first start takes minutes"; fi
 
 reset_state
 run codespace-ensure
@@ -95,6 +99,10 @@ run script -qec dev /dev/null
 expect_call "TTY: blocking ensure start" "systemctl start codespace-ensure.service [as root]"
 expect_call "TTY: creates the dev tmux session" "tmux new-session -d -s dev -n logs dev status; DEV_LOGS_WINDOW=1 dev logs"
 expect_call "TTY: attaches" "tmux attach -t =dev"
+expect_call "  no run in progress: follows the journal from now" "journalctl -f -n 0 -o cat -u codespace-ensure.service"
+reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1; state ensure_running 1
+run script -qec dev /dev/null
+expect_call "TTY, run already in progress: shows it from its start" "journalctl -f --since Tue 2026-11-03 02:07:45 UTC -o cat -u codespace-ensure.service"
 
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
 echo regional.example.com > /etc/glueops/tunnel_endpoint

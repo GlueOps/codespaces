@@ -147,7 +147,10 @@ create() {
 
     # Home and /nix live in named volumes so a recreated container keeps dotfiles, logins and
     # devbox/nix packages. Docker copies the image's content into each volume once, while it's empty;
-    # the two go together because the nix profile links in home point into /nix.
+    # the two go together because the nix profile links in home point into /nix. The image build
+    # fills them ahead of time; after `dev reset` the copy happens here and takes minutes.
+    docker volume inspect codespace-home > /dev/null 2>&1 \
+        || echo "first start: copying the image's home and /nix into new volumes; this takes a few minutes"
 
     # The main process is chosen once, at create time: the browser editor when the Slack bot wrote a
     # connection token, otherwise a VS Code tunnel that prints a GitHub device code to `docker logs`.
@@ -334,8 +337,15 @@ wait_healthy() {
 
 # Runs codespace-ensure now and waits for it, showing what it does: a first create can take minutes.
 ensure_now() {
-    local follower
-    sudo journalctl -f -n 0 -o cat -u codespace-ensure.service &
+    local follower since=""
+    # A run already in progress (e.g. the first boot's) logged its start before we got here; show it.
+    [ "$(systemctl show -p ActiveState --value codespace-ensure.service)" = activating ] \
+        && since="$(systemctl show -p InactiveExitTimestamp --value codespace-ensure.service)"
+    if [ -n "$since" ]; then
+        sudo journalctl -f --since "$since" -o cat -u codespace-ensure.service &
+    else
+        sudo journalctl -f -n 0 -o cat -u codespace-ensure.service &
+    fi
     follower=$!
     sudo systemctl start codespace-ensure.service || echo "codespace-ensure failed; status below"
     kill "$follower" 2> /dev/null || true
@@ -562,6 +572,12 @@ curl -fsSL https://tailscale.com/install.sh | sh
 if [ -n "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
+
+  # Fill the codespace's home and /nix volumes now: Docker copies the image's content into a new volume
+  # on first mount, which takes minutes and would otherwise hold up the codespace's first start.
+  echo "Filling the codespace-home and codespace-nix volumes"
+  sudo docker run --rm --entrypoint true -v codespace-home:/home/vscode -v codespace-nix:/nix \
+      "ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG"
 
   # Pre-warm the Ansible shell image (used by gluekube_ssh --ansible) so the
   # first use on a fresh VM doesn't pay a ~300MB pull. The digest-pinned
