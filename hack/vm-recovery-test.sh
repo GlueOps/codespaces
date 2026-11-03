@@ -6,7 +6,9 @@
 set -u -o pipefail
 target="${1:?usage: hack/vm-recovery-test.sh <ssh-target>}"
 read -r -a ssh_opts <<< "${SSH_OPTS:-}"
-on() { ssh -o BatchMode=yes -o ConnectTimeout=10 "${ssh_opts[@]}" "$target" "$1"; }
+# No ssh host-key checking: the reboot test compares the VM's host keys itself, and a changed key would otherwise
+# make every later ssh fail and the run hang until its time limit.
+on() { ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "${ssh_opts[@]}" "$target" "$1"; }
 fails=0
 started() { on "docker container inspect -f '{{.State.StartedAt}}' codespace"; }
 # A fault that didn't happen would pass as "healthy after 0s"; each check then confirms its fault happened.
@@ -74,6 +76,7 @@ if [ "$mode" = web ]; then
 fi
 
 boot=$(on 'cat /proc/sys/kernel/random/boot_id')
+hostkeys=$(on 'cat /etc/ssh/ssh_host_*_key.pub | sort')
 on 'systemctl reboot' 2> /dev/null
 sleep 20
 until on true 2> /dev/null && [ "$(on 'cat /proc/sys/kernel/random/boot_id')" != "$boot" ]; do
@@ -82,5 +85,10 @@ until on true 2> /dev/null && [ "$(on 'cat /proc/sys/kernel/random/boot_id')" !=
 done
 wait_healthy "reboot" 300
 changed "reboot" "$boot" "$(on 'cat /proc/sys/kernel/random/boot_id')"
+if [ "$hostkeys" = "$(on 'cat /etc/ssh/ssh_host_*_key.pub | sort')" ]; then
+    echo "  ok   SSH host keys unchanged by the reboot"
+else
+    echo "  FAIL SSH host keys changed on reboot (cloud-init treated the VM as new)"; fails=$((fails + 1))
+fi
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "$fails FAILED"; exit 1; }

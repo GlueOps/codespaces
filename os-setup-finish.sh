@@ -18,6 +18,10 @@ printf 'policy: search,found=all,maybe=all,notfound=enabled\n' | sudo tee /etc/c
 # cosmetic "dsid_missing_source" warning on Incus (source was [], but LXD was used). Silence just that.
 printf 'warnings:\n  dsid_missing_source: off\n' | sudo tee /etc/cloud/cloud.cfg.d/99-warnings.cfg >/dev/null
 
+# The cidata seed is attached only at first boot; without this, later boots re-probe datasources (~6 min), fall
+# back to DataSourceNone and act as a new instance (new SSH host keys). The cloud-init clean below resets new VMs.
+printf 'manual_cache_clean: true\n' | sudo tee /etc/cloud/cloud.cfg.d/99-manual-cache-clean.cfg >/dev/null
+
 echo "cleaning up"
 sudo cloud-init clean --machine-id --seed --logs
 sudo rm -rvf /var/lib/cloud/instances /etc/machine-id /var/lib/dbus/machine-id /var/log/cloud-init*
