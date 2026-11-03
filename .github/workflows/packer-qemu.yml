@@ -97,4 +97,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
         run: |
-          printf '%s\0' ./*.qcow2.tar.part_* | xargs -0 -P 4 -I{} gh release upload "$TAG" {} --clobber --repo "$GITHUB_REPOSITORY"    
+          printf '%s\0' ./*.qcow2.tar.part_* | xargs -0 -P 4 -I{} gh release upload "$TAG" {} --clobber --repo "$GITHUB_REPOSITORY"
