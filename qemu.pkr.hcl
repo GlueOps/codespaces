@@ -6,6 +6,18 @@ variable "image_password" {
   type    = string
 }
 
+# Defaults fit the 4 vCPU / 16 GB `codespaces` runner (and most laptops). packer-qemu.yml passes more for its
+# runner; a tag's build still uses the default branch's workflow (workflow_run), so these must stay safe.
+variable "vm_memory" {
+  type    = string
+  default = "12288M"
+}
+
+variable "vm_cpus" {
+  type    = string
+  default = "4"
+}
+
 source "qemu" "qemu-amd64" {
   accelerator       = "kvm"
   iso_url           = "https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2"
@@ -30,8 +42,8 @@ source "qemu" "qemu-amd64" {
   cd_files          = ["user-data", "meta-data"]
   cd_label          = "cidata"
   qemuargs          = [
-    ["-m", "24576M"],
-    ["-smp", "8"]
+    ["-m", var.vm_memory],
+    ["-smp", var.vm_cpus]
   ]
 }
 

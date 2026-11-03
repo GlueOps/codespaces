@@ -67,6 +67,9 @@ jobs:
         run: packer build -var glueops_codespaces_container_tag=${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }} -var image_password=${{ env.IMAGE_PASSWORD }} qemu.pkr.hcl
         env:
           PACKER_LOG: 1
+          # public-XXL is 8 vCPU / 32 GB; leaves 8 GB for the runner itself.
+          PKR_VAR_vm_cpus: "8"
+          PKR_VAR_vm_memory: "24576M"
 
 
       - id: install-aws-cli
