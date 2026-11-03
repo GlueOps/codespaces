@@ -31,6 +31,9 @@ platform, and the VM setup that runs it as a cloud development environment (CDE)
   ordered after multi-user.target, and the cycle makes systemd drop the job at boot. The VM test suite checks this.
 - The connection token (`/etc/glueops/cde_token`) never goes on a command line, into the environment or into logs.
   `code serve-web` prints it on stdout, so its stdout is discarded.
+- `packer-qemu.yml` is triggered by `workflow_run`, so it always runs the default branch's copy: a tag builds its own
+  `qemu.pkr.hcl` with `main`'s workflow (runner, env, `PKR_VAR_*`). A pre-release can't test edits to that workflow,
+  and `qemu.pkr.hcl`'s defaults must work under `main`'s.
 - Conventional Commits, release-please friendly.
 
 ## Decisions
