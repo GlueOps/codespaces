@@ -92,9 +92,9 @@ jobs:
            split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
 
       - name: Upload *.qcow2.tar.part_* files to GitHub Releases as an Asset
-        uses: xresloader/upload-to-github-release@v1
+        # Four parts at a time: one upload at a time took ~4 min. xargs fails the step if any upload fails.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          file: "*.qcow2.tar.part_*"
-          tag_name: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}    
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
+        run: |
+          printf '%s\0' ./*.qcow2.tar.part_* | xargs -0 -P 4 -I{} gh release upload "$TAG" {} --clobber --repo "$GITHUB_REPOSITORY"    

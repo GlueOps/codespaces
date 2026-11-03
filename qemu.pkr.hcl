@@ -58,7 +58,8 @@ build {
 
   post-processor "shell-local" {
     inline = [
-      "qemu-img convert -O qcow2 -c images/${var.glueops_codespaces_container_tag}.qcow2 images/${var.glueops_codespaces_container_tag}-compressed.qcow2",
+      # zstd, written in parallel: seconds instead of ~6 min of single-core zlib. Still qcow2; readers need QEMU >= 5.1.
+      "qemu-img convert -O qcow2 -c -W -m 16 -o compression_type=zstd images/${var.glueops_codespaces_container_tag}.qcow2 images/${var.glueops_codespaces_container_tag}-compressed.qcow2",
       "rm user-data",
       "rm meta-data",
       "rm images/${var.glueops_codespaces_container_tag}.qcow2",

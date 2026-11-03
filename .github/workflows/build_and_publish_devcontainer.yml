@@ -8,7 +8,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # The larger runner the Packer build uses: more CPU for the ~9 min image build and its push.
+    runs-on: codespaces
     steps:
       - name: Debug Print Ref Info
         run: |
