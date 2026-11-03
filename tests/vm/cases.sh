@@ -52,7 +52,7 @@ printf '#!/bin/sh\necho "code-tunnel $*" >&2\n' > /usr/share/code/bin/code-tunne
 printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/cde-trust-serve-web
 chmod +x /usr/share/code/bin/code-tunnel /usr/local/bin/cde-trust-serve-web
 pinned="$(HOME=$fake_home bash -c "$container_cmd" 2>&1)"
-if grep -qF -- "serve-web --commit-id aaa111 --host" <<< "$pinned"; then pass "  pins serve-web to the finished baked server"; else fail "  pins serve-web to the finished baked server ($pinned)"; fi
+if grep -qF -- "serve-web --commit-id aaa111 --disable-telemetry --host" <<< "$pinned"; then pass "  pins serve-web to the finished baked server, telemetry off"; else fail "  pins serve-web to the finished baked server, telemetry off ($pinned)"; fi
 rm -rf "$sw/aaa111"
 pinned="$(HOME=$fake_home bash -c "$container_cmd" 2>&1)"
 if grep -q -- "--commit-id" <<< "$pinned"; then fail "  only a staging download: no --commit-id ($pinned)"; else pass "  only a staging download: no --commit-id"; fi
