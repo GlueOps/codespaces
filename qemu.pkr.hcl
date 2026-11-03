@@ -35,7 +35,6 @@ build {
 
   provisioner "shell" {
     scripts = [
-      "sudo apt update && sudo apt dist-upgrade -y",
       "os-setup-start.sh",
       "developer-setup.sh",
       "os-setup-finish.sh",
