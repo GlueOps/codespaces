@@ -14,7 +14,7 @@ on:
 jobs:
   build:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: codespaces
+    runs-on: public-XXL
     timeout-minutes: 60
     steps:
       - name: Enable KVM group perms

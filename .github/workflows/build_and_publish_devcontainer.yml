@@ -8,8 +8,8 @@ on:
 
 jobs:
   build:
-    # The larger runner the Packer build uses: more CPU for the ~9 min image build and its push.
-    runs-on: codespaces
+    # 8 vCPU / 32 GB, the same runner as the Packer build: more CPU for the ~9 min image build.
+    runs-on: public-XXL
     steps:
       - name: Debug Print Ref Info
         run: |
