@@ -132,7 +132,7 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && apt update \
     && apt install "code=${VERSION_VSCODE}-*" wget gpg apt-transport-https -y \
     && apt clean -y \
-    && curl -fLk "https://update.code.visualstudio.com/${VERSION_VSCODE}/cli-alpine-x64/stable" --output vscode_cli.tar.gz \
+    && curl -fL "https://update.code.visualstudio.com/${VERSION_VSCODE}/cli-alpine-x64/stable" --output vscode_cli.tar.gz \
     && tar -xf vscode_cli.tar.gz \
     && rm vscode_cli.tar.gz
 

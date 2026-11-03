@@ -47,6 +47,10 @@ Settled; reviewers shouldn't re-raise these.
 - The browser editor's VS Code server is pinned (`serve-web --commit-id`) to the one baked into the image: a VM gets no
   VS Code updates in place, including security releases, until a new VM. In exchange there's no ~700 MB download on a
   browser connect and the workspace-trust shim always applies.
+- VS Code is one version, `ARG VERSION_VSCODE` in the Dockerfile (code package, CLI, and the baked server via the CLI's
+  commit). New images get a newer VS Code only when Renovate bumps it; `renovate.json` exempts it from the org's 30-day
+  wait so security releases reach new images quickly.
+- The browser editor runs with `--disable-telemetry`. `code tunnel` has no such flag; its users' own VS Code settings apply.
 - Credentials kept in the home volume survive a container recreate. `dev reset` removes them.
 - The sish tunnel keeps `StrictHostKeyChecking=no` with `UserKnownHostsFile=/dev/null`: sish host keys may change.
 - serve-web listens on 127.0.0.1 only; nobody uses :8000 on the tailnet IP.

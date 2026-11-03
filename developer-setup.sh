@@ -159,7 +159,6 @@ create() {
         # stdout carries "Web UI available at ...?tkn=<token>", so it goes nowhere; errors are on stderr.
         # --commit-id pins the server baked into the image: without it serve-web fetches each new VS Code
         # release on a browser connect (~700 MB) and runs it without cde-trust-serve-web's shim.
-        # --disable-telemetry is passed on to the server, which then sends none.
         cmd='[ -s /etc/glueops/cde_token ] || exit 1; cde-trust-serve-web || true; d=$(ls -d "$HOME"/.vscode/cli/serve-web/*/ 2> /dev/null | grep -v "\.staging" | tail -n 1); d=${d%/}; c=${d##*/}; exec /usr/share/code/bin/code-tunnel serve-web ${c:+--commit-id "$c"} --disable-telemetry --host 127.0.0.1 --port 8000 --accept-server-license-terms --connection-token-file /etc/glueops/cde_token > /dev/null'
     else
         cmd='exec /usr/share/code/bin/code-tunnel tunnel --random-name --accept-server-license-terms'
