@@ -8,8 +8,7 @@ on:
 
 jobs:
   build:
-    # The same large runner as the Packer build: more CPU for the ~9 min image build.
-    runs-on: public-XXL
+    runs-on: ubuntu-latest
     steps:
       - name: Debug Print Ref Info
         run: |
