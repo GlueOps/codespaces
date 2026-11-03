@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "VS Code (the image's code package, CLI and baked serve-web server): no 30-day wait, and only x.y.z tags (the repo also has tags like v14 and vsda-v1.39.1)",
+      "matchDatasources": ["github-tags"],
+      "matchPackageNames": ["microsoft/vscode"],
+      "minimumReleaseAge": "0 days",
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
+    }
+  ]
+}

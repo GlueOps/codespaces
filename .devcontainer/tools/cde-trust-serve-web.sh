@@ -22,9 +22,10 @@
 # it once (this is the same download that would happen on first connect, just moved earlier).
 #
 # WHERE THIS RUNS: (1) at IMAGE BUILD — .devcontainer/Dockerfile runs this and then asserts
-# the shim landed, so the build fails if it didn't; (2) at RUNTIME — developer-setup.sh's
-# `dev` calls it before `code serve-web` (a no-op when the baked server is already shimmed;
-# re-shims if a VS Code update pulled a new server).
+# the shim landed, so the build fails if it didn't; (2) at RUNTIME — the codespace container's
+# main process (set by developer-setup.sh's codespace-ensure) runs it before serve-web. That's a
+# no-op on the baked server, which codespace-ensure pins serve-web to with --commit-id; it only
+# downloads and shims when the home volume has no finished server (e.g. an image without one).
 #
 # ─────────────────────────────────────────────────────────────────────────────────────────
 # IF THIS BREAKS (trust prompt returns, OR the Dockerfile build assertion fails): it almost
@@ -69,11 +70,12 @@ SHIM_MARK='cde-trust-serve-web shim'
 # Remove any temp file we might leave behind if interrupted mid-write (PID-scoped).
 trap 'rm -f "$SW"/*/bin/code-server.tmp."$$" 2>/dev/null || true' EXIT
 
-# True when a fully-extracted server wrapper exists (ignore the transient "<hash>.staging" dir).
+# True when a fully-extracted server wrapper exists. serve-web extracts into "<hash>.staging-<uuid>"
+# (older versions: "<hash>.staging") and renames it to "<hash>" only when done, so skip those.
 server_present() {
     local f
     for f in "$SW"/*/bin/code-server; do
-        case "$f" in *".staging/"*) continue ;; esac
+        case "$f" in *".staging"*) continue ;; esac
         [ -f "$f" ] && return 0
     done
     return 1
@@ -100,7 +102,9 @@ SH
 if ! server_present; then
     echo "cde-trust-serve-web: serve-web server not downloaded yet; front-loading it…"
     log="$(mktemp)"
-    timeout 240 code serve-web --accept-server-license-terms --without-connection-token \
+    # The server for the installed CLI's own commit ("code 1.144.1 (commit <sha>)"), not whatever is latest.
+    commit="$(/usr/share/code/bin/code-tunnel --version 2>/dev/null | sed -n 's/.*(commit \([0-9a-f]*\)).*/\1/p')"
+    timeout 240 code serve-web ${commit:+--commit-id "$commit"} --accept-server-license-terms --without-connection-token \
         --host 127.0.0.1 --port 0 >"$log" 2>&1 &
     dl=$!
     port=""
@@ -131,7 +135,7 @@ fi
 
 changed=0
 for cs in "$SW"/*/bin/code-server; do
-    case "$cs" in *".staging/"*) continue ;; esac
+    case "$cs" in *".staging"*) continue ;; esac
     [ -f "$cs" ] || continue
     grep -qF "$SHIM_MARK" "$cs" 2>/dev/null && continue
     if shim_one "$cs"; then

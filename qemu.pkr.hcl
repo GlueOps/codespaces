@@ -6,6 +6,18 @@ variable "image_password" {
   type    = string
 }
 
+# Defaults fit the 4 vCPU / 16 GB `codespaces` runner (and most laptops). packer-qemu.yml passes more for its
+# runner; a tag's build still uses the default branch's workflow (workflow_run), so these must stay safe.
+variable "vm_memory" {
+  type    = string
+  default = "12288M"
+}
+
+variable "vm_cpus" {
+  type    = string
+  default = "4"
+}
+
 source "qemu" "qemu-amd64" {
   accelerator       = "kvm"
   iso_url           = "https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.qcow2"
@@ -18,6 +30,11 @@ source "qemu" "qemu-amd64" {
   ssh_username      = "debian"
   ssh_password      = "${var.image_password}"
   shutdown_command  = "sudo fstrim -av && sudo shutdown -P now"
+  # Plugin default discard=ignore drops the fstrim, leaving deleted files' blocks in the image.
+  disk_discard       = "unmap"
+  disk_detect_zeroes = "unmap"
+  # The post-processor's zstd qemu-img convert already compacts the image.
+  skip_compaction   = true
   headless          = true
   ssh_wait_timeout  = "5m"
   vnc_port_min      = 5901
@@ -25,8 +42,8 @@ source "qemu" "qemu-amd64" {
   cd_files          = ["user-data", "meta-data"]
   cd_label          = "cidata"
   qemuargs          = [
-    ["-m", "12288M"],
-    ["-smp", "4"]
+    ["-m", var.vm_memory],
+    ["-smp", var.vm_cpus]
   ]
 }
 
@@ -58,7 +75,8 @@ build {
 
   post-processor "shell-local" {
     inline = [
-      "qemu-img convert -O qcow2 -c images/${var.glueops_codespaces_container_tag}.qcow2 images/${var.glueops_codespaces_container_tag}-compressed.qcow2",
+      # zstd, written in parallel: seconds instead of ~6 min of single-core zlib. Still qcow2; readers need QEMU >= 5.1.
+      "qemu-img convert -O qcow2 -c -W -m 16 -o compression_type=zstd images/${var.glueops_codespaces_container_tag}.qcow2 images/${var.glueops_codespaces_container_tag}-compressed.qcow2",
       "rm user-data",
       "rm meta-data",
       "rm images/${var.glueops_codespaces_container_tag}.qcow2",

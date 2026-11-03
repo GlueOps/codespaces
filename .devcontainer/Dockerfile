@@ -40,6 +40,9 @@ ARG VERSION_KREW=0.5.0
 ARG VERSION_CLAUDE_CODE=2.1.316
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
 ARG VERSION_CLOUDFLARED=2026.9.3
+# One version for the code package, the CLI and the serve-web server baked below (it uses the CLI's commit).
+# renovate: datasource=github-tags depName=microsoft/vscode
+ARG VERSION_VSCODE=1.144.1
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
@@ -127,9 +130,9 @@ RUN wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor 
     && sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list' \
     && rm -f packages.microsoft.gpg \
     && apt update \
-    && apt install code wget gpg apt-transport-https -y \
+    && apt install "code=${VERSION_VSCODE}-*" wget gpg apt-transport-https -y \
     && apt clean -y \
-    && curl -Lk 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64' --output vscode_cli.tar.gz \
+    && curl -fL "https://update.code.visualstudio.com/${VERSION_VSCODE}/cli-alpine-x64/stable" --output vscode_cli.tar.gz \
     && tar -xf vscode_cli.tar.gz \
     && rm vscode_cli.tar.gz
 
@@ -298,8 +301,12 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
 # Code version bump changed the server. See the "IF THIS BREAKS" troubleshooting block in
 # .devcontainer/tools/cde-trust-serve-web.sh for the exact checks (launcher shape, the flag,
 # the workbench gate) and how to fix it.
+# Only a finished server counts; a "<hash>.staging-*" leftover means the pre-bake failed.
 RUN cde-trust-serve-web \
-    && grep -q 'cde-trust-serve-web shim' /home/vscode/.vscode/cli/serve-web/*/bin/code-server
+    && d="$(ls -d /home/vscode/.vscode/cli/serve-web/*/ | grep -v '\.staging')" \
+    && [ "$(echo "$d" | wc -l)" = 1 ] \
+    && grep -q 'cde-trust-serve-web shim' "${d}bin/code-server" \
+    && ! ls -d /home/vscode/.vscode/cli/serve-web/*.staging* 2> /dev/null
 
 USER root
 RUN mkdir -p /home/vscode/.kube && chmod 0700 /home/vscode/.kube

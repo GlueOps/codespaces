@@ -17,16 +17,50 @@ devbox shell
 python --version
 ```
 
+## The codespace VM: boot, recovery and `dev`
+
+A codespace VM runs one container, `codespace`, and keeps it running by itself. Nobody has to log in after a reboot,
+a crash or an out-of-memory kill.
+
+- **The container** restarts itself (`--restart unless-stopped`). Its main process is the editor:
+  `code serve-web` on `127.0.0.1:8000` when the Slack bot wrote a connection token, otherwise a VS Code tunnel
+  (`code tunnel`) that you log in to with a GitHub device code.
+- **`codespace-ensure`** (`codespace-ensure.service`, at boot and every minute from `codespace-ensure.timer`) starts
+  the container if it's stopped, and creates it from the image tag in `/etc/glueops/codespace-tag` if it's missing.
+  A container you stop with `docker stop` is started again within a minute.
+- **`codespace-tunnel.service`** runs the sish reverse tunnel for the browser editor and reconnects whenever it drops.
+- Home (`/home/vscode`) and `/nix` are named volumes (`codespace-home`, `codespace-nix`), so a recreated container
+  keeps your dotfiles, logins and devbox packages. The image build fills them, so a new codespace starts quickly;
+  after `dev reset` the first start copies them again and takes a few minutes. `/workspaces/glueops` is on the VM's
+  disk. None of this survives deleting the VM: commit and push.
+
+When the editor process restarts (after an OOM kill, for example), the browser tab says it can't reconnect: reload the
+page. Terminals and anything else running inside the container are gone after a restart.
+
+Run `dev` (as any user) to check on it:
+
+```
+dev          repair if needed, show status, open the `dev` tmux session (window `logs`, window `shell`)
+dev status   status only; exit 0 if healthy, 1 if not
+dev logs     follow the codespace's logs (the `logs` window runs this; Ctrl-C there is harmless)
+dev reset    delete the container AND its home and /nix volumes, then create it again
+```
+
+`dev status` shows the device code when a VS Code tunnel is waiting for its first login (it's also in
+`docker logs codespace`). After that first login the tunnel reconnects by itself. Low-level logs:
+`sudo journalctl -u codespace-ensure -u codespace-tunnel`. The secrets in `/etc/glueops/codespace.env` are passed to
+the container as environment variables, so they show in `docker inspect`, as before.
+
 ## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`
 
-When a codespace container starts, `dev` runs a one-time bootstrap (`cde-boot`) driven by the `CDE_SETUP_SCRIPT` environment variable (supplied by the Slack bot via `/etc/glueops/codespace.env`). The value selects what runs:
+When `codespace-ensure` creates or starts the container, it runs a one-time bootstrap (`cde-boot`) driven by the `CDE_SETUP_SCRIPT` environment variable (supplied by the Slack bot via `/etc/glueops/codespace.env`). The value selects what runs:
 
 - **unset / empty** (the default — the Slack bot leaves it commented out) — runs **`cde-init`**: authenticates GitHub from `GITHUB_TOKEN` (non-interactive; runs `gh auth setup-git` so `git`/private-repo clones work, and sets your git identity), clones `GLUEOPS_CDE_CLONE_REPO` into `/workspaces/glueops/<repo>` (public repos need no token), and seeds `gluekube_ssh` (AutoGlue) `prod`/`nonprod` profiles from `GLUEKUBE_SSH_AUTOGLUE_{PROD,NONPROD}_{URL,TOKEN}` — a profile is seeded only when **both** its URL and token are set.
 - **a command** — e.g. `curl setup.example.com | zsh` runs instead of `cde-init`.
 - **`base64:<encoded>`** — a base64-encoded script, for complex/multi-line setup (`<your script> | base64 -w0`). A decode failure is refused (never runs a partial script).
 - **`true`** (or any no-op) — skip setup entirely.
 
-Every step is best-effort and non-fatal; unconfigured inputs are skipped. It runs once per container: the sentinel `~/.cde-init-done` is written **only when setup exits 0**, so a hard failure (or a bad `base64:` value) is retried on the next boot rather than silently marked done; output is captured to `~/.cde-init.log`. Set `CDE_INIT_FORCE=1`, or just run `cde-init` / `cde-boot` again, to re-run. The tools live in `.devcontainer/tools/` (`cde-init.sh`, `cde-boot.sh`) and are installed to `/usr/local/bin` by the image build.
+Every step is best-effort and non-fatal; unconfigured inputs are skipped. It runs once per home volume: the sentinel `~/.cde-init-done` lives in home, so a recreated container doesn't run it again. The sentinel is written **only when setup exits 0**, so a hard failure (or a bad `base64:` value) is tried again the next time `codespace-ensure` creates or starts the container, rather than silently marked done; output is captured to `~/.cde-init.log`. Set `CDE_INIT_FORCE=1`, or just run `cde-init` / `cde-boot` again, to re-run. The tools live in `.devcontainer/tools/` (`cde-init.sh`, `cde-boot.sh`) and are installed to `/usr/local/bin` by the image build.
 
 Because the default GitHub auth is token-based, running `yolo` afterward is a smooth no-op (it detects the existing auth and skips the interactive browser login).
 
@@ -69,7 +103,8 @@ predate the pin keep the legacy path, where the argocd step installs ArgoCD's ow
 The command lives at `.devcontainer/libexec/captain_utils/crds`, installed to `/usr/local/libexec/captain_utils/`
 and deliberately off the PATH; its file header carries the full usage and the contract it is held to. Tests:
 `hack/test-captain-utils.sh` (offline, seconds) and `CRDS_TEST_KIND=1 hack/test-captain-utils.sh` for the cluster
-test. (`hack/test.sh` runs every app's suite, including gluekube_ssh's, which requires python3.)
+test. (`hack/test.sh` runs every app's suite, including gluekube_ssh's, which requires python3, and the VM suite
+`hack/test-codespace-vm.sh` with `CODESPACE_VM_TEST_DOCKER=1`, which needs docker.)
 
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
@@ -86,14 +121,14 @@ test. (`hack/test.sh` runs every app's suite, including gluekube_ssh's, which re
 To test a `pre-release` you will first to do the following:
 1) Make sure a nonprod/stage provisioner API functioning is working and has a node for you to test with.
 2) In the nonprod slack channel for the developer workspaces (e.g. `#testing-developer-workspaces`) run `!vm` and you should see the `pre-release` tag.
-3) Select the `pre-release` tag and login to the VM as normal.
-4) Once you change to the `vscode` user, run `export ENVIRONMENT=nonprod` and then run `dev` as usual
-5) You should now see the `pre-release` tag you created earlier as part of the release process, select it and preform your tests.
+3) Select the `pre-release` tag. The VM starts the codespace from that tag by itself; log in and run `dev` to see it.
+4) To try a different image tag on that VM: `export ENVIRONMENT=nonprod`, then `dev reset` and pick the tag. This deletes the container and its home and `/nix` volumes.
+5) Before promoting the `pre-release`, run `hack/vm-recovery-test.sh root@<vm>` against a nonprod VM created this way (one with a token and one without; on the one without, finish the device login first: the code is in `dev status`): it kills the editor, the tunnel and the container, restarts docker and tailscaled, and reboots, and checks the codespace comes back each time. Also check the first boot: the URL from Slack should work a few minutes after the VM is created, without logging in.
 
 
 # Local Dev / Running packer locally:
 
-It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command.
+It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command. The qemu build compresses the image with zstd, so it needs `qemu-img` 5.1 or newer (as does anything that reads the image). Its build VM defaults to 12 GB of RAM and 4 vCPUs (`-var vm_memory=... -var vm_cpus=...` to change; CI uses 24 GB / 8).
 
 ### Break Glass Setup
 
@@ -104,6 +139,7 @@ If you are having issues spinning up a VM using our automation, just create a VM
 # export GLUEOPS_CODESPACES_CONTAINER_TAG=v0.129.0 #update tag to latest version found here: https://github.com/GlueOps/codespaces/releases
 curl -sL setup.glueops.dev | bash
 sudo tailscale up --ssh
+sudo reboot   # the codespace starts on boot; or run `dev` to start it now
 ```
 
 _Note:_ as of April 2025 we have been using Debian 12 as our base Operating System. It's possible Debian 13 or newer work but we haven't tested it yet.

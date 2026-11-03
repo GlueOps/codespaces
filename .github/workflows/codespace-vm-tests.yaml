@@ -1,0 +1,24 @@
+name: codespace VM tests
+on:
+  pull_request:
+    paths:
+      - 'developer-setup.sh'
+      - '.devcontainer/tools/cde-trust-serve-web.sh'
+      - 'tests/vm/**'
+      - 'hack/test-codespace-vm.sh'
+      - 'hack/test.sh'
+      - '.github/workflows/codespace-vm-tests.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Runs inside a digest-pinned debian:13 container (systemd, cloud-init); no privileges needed.
+      - name: hack/test-codespace-vm.sh
+        run: ./hack/test-codespace-vm.sh

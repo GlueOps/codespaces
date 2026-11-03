@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "journalctl $* [as $(id -un)]" >> "$S/calls"

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Fake docker for the VM tests. State lives in $STATE (see tests/vm/cases.sh); every call is logged.
+S=${STATE:-/tmp/vmstate}
+echo "docker $* [as $(id -un)]" >> "$S/calls"
+get() { cat "$S/$1" 2> /dev/null || echo "${2:-}"; }
+case "$1" in
+    info) [ -e "$S/docker_down" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }; exit 0 ;;
+    container)
+        [ "$2" = inspect ] || exit 0
+        fmt="$4"
+        [ "$(get container missing)" = missing ] && { echo "Error response from daemon: No such container: $5" >&2; exit 1; }
+        st=$(get container)
+        run=false; case "$st" in running | restarting) run=true ;; esac
+        out=${fmt//\{\{.State.Running\}\}/$run}
+        out=${out//\{\{.State.Status\}\}/$st}
+        out=${out//\{\{.State.StartedAt\}\}/$(get started 2026-01-01T00:00:00Z)}
+        out=${out//\{\{.RestartCount\}\}/0}
+        out=${out//\{\{.State.OOMKilled\}\}/false}
+        out=${out//\{\{.State.ExitCode\}\}/0}
+        out=${out//\{\{.Config.Image\}\}/$(get image ghcr.repo.gpkg.io/glueops/codespaces:v1)}
+        out=${out//\{\{.State.Error\}\}/}
+        out=${out//\{\{json .Config.Cmd\}\}/$(get cmd '["bash"]')}
+        echo "$out"
+        ;;
+    volume) [ "$2" = inspect ] && [ -e "$S/no_volume" ] && { echo "Error response from daemon: get $3: no such volume" >&2; exit 1; } ;;
+    start) echo running > "$S/container" ;;
+    run)
+        shift
+        while [ $# -gt 0 ] && [[ "$1" != ghcr.repo.gpkg.io/glueops/codespaces:* ]]; do shift; done
+        echo "$1" > "$S/image"; shift
+        printf '%s\n' "$@" | jq -R . | jq -sc . > "$S/cmd"
+        echo running > "$S/container"
+        ;;
+    exec)
+        case "$*" in
+            *"tunnel status"*) get tunnel_status '{"tunnel":null}' ;;
+            *) echo "CDE-BOOT-OUTPUT may echo secrets" ;;
+        esac
+        ;;
+    logs) get logs ;;
+    rm) echo missing > "$S/container" ;;
+esac
+exit 0

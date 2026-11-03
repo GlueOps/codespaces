@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+S=${STATE:-/tmp/vmstate}
+echo "curl $* [as $(id -un)]" >> "$S/calls"
+case "$*" in
+    *127.0.0.1:8000*) cat "$S/http" 2> /dev/null || printf 403 ;;
+    *get-images*) echo '{"images":["v9","v8","v7"]}' ;;
+esac

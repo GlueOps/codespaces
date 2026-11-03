@@ -22,9 +22,10 @@ echo "Installing other requirements now"
 
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
-sudo mkdir -p /etc/docker && echo '{"mtu": 1400}' | sudo tee /etc/docker/daemon.json > /dev/null && sudo systemctl restart docker
+# live-restore: restarting dockerd (or a patch upgrade) leaves the codespace running. local driver: rotated logs.
+sudo mkdir -p /etc/docker && echo '{"mtu": 1400, "log-driver": "local", "log-opts": {"max-size": "10m", "max-file": "3"}, "live-restore": true}' | sudo tee /etc/docker/daemon.json > /dev/null && sudo systemctl restart docker
 sudo apt-get update --error-on=any
-sudo apt install tmux jq figlet qemu-guest-agent incus-agent autossh ripgrep -y
+sudo apt install tmux jq figlet qemu-guest-agent incus-agent ripgrep -y
 sudo apt-get clean
 sudo mkdir -p /etc/qemu
 printf '[general]\nblacklist =\n' | sudo tee /etc/qemu/qemu-ga.conf
@@ -36,7 +37,7 @@ sudo usermod -aG docker vscode
 # Debian 13 (trixie) systemd-sysctl no longer reads /etc/sysctl.conf; use /etc/sysctl.d/.
 echo 'fs.inotify.max_user_instances=1024' | sudo tee /etc/sysctl.d/99-glueops-codespaces.conf
 echo 1024 | sudo tee /proc/sys/fs/inotify/max_user_instances
-echo "Create .glueopsrc"
+
 
 
 ### Install GUM
@@ -72,376 +73,485 @@ echo "✅ 'gum' installed successfully to /usr/bin/gum"
 echo "   Verify with: gum --version"
 gum --version
 
-#Setup systemd service for dev command
-sudo tee /etc/systemd/system/launch-dev.service > /dev/null <<'EOF'
+### Codespace supervision
+# Everything the VM needs to keep the codespace running is embedded below, so the break-glass
+# `curl setup.glueops.dev | bash` path stays a single file. Each file has its own quoted heredoc
+# delimiter: the scripts contain heredocs of their own, and quoting keeps them uninterpolated here.
+sudo install -d -m 0755 /usr/local/lib/codespace /etc/glueops
+
+sudo tee /usr/local/lib/codespace/common.sh > /dev/null <<'CODESPACE_COMMON_EOF'
+# Shared by codespace-ensure, codespace-tunnel and dev.
+# shellcheck shell=bash disable=SC2034
+CODESPACE_NAME=codespace
+CODESPACE_IMAGE_REPO=ghcr.repo.gpkg.io/glueops/codespaces
+CODESPACE_TAG_FILE=/etc/glueops/codespace-tag
+CODESPACE_TOKEN_FILE=/etc/glueops/cde_token
+CODESPACE_ENV_FILE=/etc/glueops/codespace.env
+CODESPACE_LEGACY_ENDPOINT=tunnels.glueopshosted.com
+
+# Regional sish endpoint written by cloud-init on newer VMs; older VMs have no file and stay on the
+# legacy central tunnel.
+codespace_tunnel_endpoint() {
+    local endpoint=""
+    [ -s /etc/glueops/tunnel_endpoint ] && endpoint="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
+    echo "${endpoint:-$CODESPACE_LEGACY_ENDPOINT}"
+}
+
+# Legacy central sish runs --append-user-to-subdomain, so the VM binds "cde" and the URL becomes
+# cde-<hostname>.<endpoint>; regional instances don't, so the VM binds its bare hostname. The Slack
+# bot derives the access URL from the same rule (util/libvirt/libvirt-server.js cdeAccessUrl).
+codespace_tunnel_bind() {
+    if [ "$(codespace_tunnel_endpoint)" = "$CODESPACE_LEGACY_ENDPOINT" ]; then echo cde; else hostname; fi
+}
+
+codespace_url() {
+    local endpoint
+    endpoint="$(codespace_tunnel_endpoint)"
+    if [ "$endpoint" = "$CODESPACE_LEGACY_ENDPOINT" ]; then
+        echo "https://cde-$(hostname).$endpoint"
+    else
+        echo "https://$(hostname).$endpoint"
+    fi
+}
+CODESPACE_COMMON_EOF
+
+sudo tee /usr/local/bin/codespace-ensure > /dev/null <<'CODESPACE_ENSURE_EOF'
+#!/usr/bin/env bash
+# codespace-ensure: start the codespace container, creating it if it doesn't exist.
+# Run as root by codespace-ensure.service, at boot and every minute from codespace-ensure.timer.
+# The container restarts itself (--restart unless-stopped); this covers the cases Docker doesn't:
+# first boot, a start that failed (e.g. its init was OOM-killed, after which Docker gives up), and
+# a container someone removed.
+set -euo pipefail
+# shellcheck source=/dev/null
+. /usr/local/lib/codespace/common.sh
+
+exec 9> /run/lock/codespace-ensure.lock
+flock 9
+
+docker info > /dev/null 2>&1 || { echo "docker is not reachable; retrying on the next run" >&2; exit 1; }
+
+create() {
+    local tag gid image
+    tag="$(tr -d '[:space:]' < "$CODESPACE_TAG_FILE" 2> /dev/null || true)"
+    if [ -z "$tag" ]; then
+        echo "no image tag in $CODESPACE_TAG_FILE; write one there (e.g. v0.163.0)" >&2
+        exit 1
+    fi
+    image="$CODESPACE_IMAGE_REPO:$tag"
+    gid="$(getent group docker | cut -d: -f3)"
+    install -d -o vscode -g vscode /workspaces/glueops
+    # docker run --env-file errors if the file is missing; an empty file is zero vars.
+    touch "$CODESPACE_ENV_FILE"
+    chmod 600 "$CODESPACE_ENV_FILE"
+
+    # Home and /nix live in named volumes so a recreated container keeps dotfiles, logins and
+    # devbox/nix packages. Docker copies the image's content into each volume once, while it's empty;
+    # the two go together because the nix profile links in home point into /nix.
+    docker volume inspect codespace-home > /dev/null 2>&1 \
+        || echo "first start: copying the image's home and /nix into new volumes; this takes a few minutes"
+
+    # The main process is chosen once, at create time: the browser editor when the Slack bot wrote a
+    # connection token, otherwise a VS Code tunnel that prints a GitHub device code to `docker logs`.
+    # code-tunnel is called directly: the `code` wrapper adds a ~100MB Electron parent for nothing.
+    local cmd
+    if [ -s "$CODESPACE_TOKEN_FILE" ]; then
+        # stdout carries "Web UI available at ...?tkn=<token>", so it goes nowhere; errors are on stderr.
+        # --commit-id pins the server baked into the image: without it serve-web fetches each new VS Code
+        # release on a browser connect (~700 MB) and runs it without cde-trust-serve-web's shim.
+        cmd='[ -s /etc/glueops/cde_token ] || exit 1; cde-trust-serve-web || true; d=$(ls -d "$HOME"/.vscode/cli/serve-web/*/ 2> /dev/null | grep -v "\.staging" | tail -n 1); d=${d%/}; c=${d##*/}; exec /usr/share/code/bin/code-tunnel serve-web ${c:+--commit-id "$c"} --disable-telemetry --host 127.0.0.1 --port 8000 --accept-server-license-terms --connection-token-file /etc/glueops/cde_token > /dev/null'
+    else
+        cmd='exec /usr/share/code/bin/code-tunnel tunnel --random-name --accept-server-license-terms'
+    fi
+    echo "creating $CODESPACE_NAME from $image"
+    # /var/run/tailscale is bound as a directory: a bound socket *file* that is missing at start
+    # makes Docker create a directory there and the start fails. /etc/glueops likewise, so a file
+    # written after create still shows up.
+    docker run -d --name "$CODESPACE_NAME" --restart unless-stopped --init \
+        --net=host --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --device=/dev/net/tun \
+        -u "1337:$gid" -w /workspaces/glueops \
+        -v codespace-home:/home/vscode -v codespace-nix:/nix \
+        -v /workspaces/glueops:/workspaces/glueops \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v /var/run/tailscale:/var/run/tailscale \
+        -v /etc/glueops:/etc/glueops:ro \
+        --env-file "$CODESPACE_ENV_FILE" \
+        "$image" bash -lc "$cmd" > /dev/null
+}
+
+started=0
+if running="$(docker container inspect -f '{{.State.Running}}' "$CODESPACE_NAME" 2>&1)"; then
+    if [ "$running" != true ]; then
+        echo "starting $CODESPACE_NAME"
+        docker start "$CODESPACE_NAME" > /dev/null
+        started=1
+    fi
+elif grep -qi 'no such container' <<< "$running"; then
+    create
+    started=1
+else
+    echo "docker container inspect failed: $running" >&2
+    exit 1
+fi
+
+if [ "$started" = 1 ]; then
+    # One-time setup inside the container (sentinel-guarded). It tees its own log to ~/.cde-init.log;
+    # its output can echo secrets from codespace.env, so it stays out of the journal.
+    docker exec --env-file "$CODESPACE_ENV_FILE" "$CODESPACE_NAME" bash -lc 'command -v cde-boot > /dev/null && cde-boot || true' > /dev/null 2>&1 \
+        || echo "cde-boot failed (non-fatal); see ~/.cde-init.log in the container" >&2
+fi
+
+# The tunnel unit is wanted at boot, but a token can arrive later (or cloud-init may not run at all).
+if [ -s "$CODESPACE_TOKEN_FILE" ]; then
+    systemctl start --no-block codespace-tunnel.service
+fi
+CODESPACE_ENSURE_EOF
+
+sudo tee /usr/local/bin/codespace-tunnel > /dev/null <<'CODESPACE_TUNNEL_EOF'
+#!/usr/bin/env bash
+# codespace-tunnel: the sish reverse tunnel for the browser editor on 127.0.0.1:8000.
+# Run as vscode by codespace-tunnel.service, which restarts it whenever ssh exits.
+set -euo pipefail
+# shellcheck source=/dev/null
+. /usr/local/lib/codespace/common.sh
+
+key="$HOME/.ssh/sish_tunnel_key_id_ed25519"
+if [ ! -f "$key" ]; then
+    umask 077
+    mkdir -p "$HOME/.ssh"
+    ssh-keygen -q -t ed25519 -N "" -C sish_tunnel_key -f "$key"
+fi
+
+host="$(hostname)"
+# ExitOnForwardFailure + ServerAlive*: a refused forward or a dead path makes ssh exit, so systemd
+# reconnects instead of leaving a connected ssh with no tunnel.
+# IdentitiesOnly: sish pins the first key it accepts per username; never let an agent key win that.
+exec ssh -N -T \
+    -o ExitOnForwardFailure=yes -o BatchMode=yes -o ConnectTimeout=15 \
+    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    -o IdentitiesOnly=yes -i "$key" \
+    -p 2222 -l "$host" -R "$(codespace_tunnel_bind):80:localhost:8000" "$(codespace_tunnel_endpoint)"
+CODESPACE_TUNNEL_EOF
+
+sudo tee /usr/local/bin/dev > /dev/null <<'CODESPACE_DEV_EOF'
+#!/usr/bin/env bash
+# dev: check on and repair the codespace.
+#   dev          make sure the codespace is up, show its status, open the `dev` tmux session
+#   dev status   print status; exit 0 if healthy, 1 if not
+#   dev logs     follow the codespace's logs (the `logs` window of the tmux session runs this)
+#   dev reset    delete the codespace container and its home and /nix volumes, then create it again
+#                (with ENVIRONMENT=nonprod it asks which image tag to use)
+set -euo pipefail
+
+# Everything runs as vscode; root (or anyone else) is switched over, keeping the arguments.
+if [ "$(id -un)" != vscode ]; then
+    exec sudo -u vscode -H -- env ENVIRONMENT="${ENVIRONMENT:-}" /usr/local/bin/dev "$@"
+fi
+# shellcheck source=/dev/null
+. /usr/local/lib/codespace/common.sh
+
+ENVIRONMENT="${ENVIRONMENT:-prod}"
+
+# web: the browser editor (serve-web); tunnel: a VS Code tunnel (device-code login); missing.
+codespace_mode() {
+    local cmd
+    cmd="$(docker container inspect -f '{{json .Config.Cmd}}' "$CODESPACE_NAME" 2> /dev/null)" || { echo missing; return; }
+    case "$cmd" in
+        *serve-web*) echo web ;;
+        *) echo tunnel ;;
+    esac
+}
+
+# Prints one line per part and returns 0 only if the codespace is usable.
+status() {
+    local healthy=0 info state running started restarts oom code err image
+    if ! info="$(docker container inspect -f '{{.State.Status}}|{{.State.Running}}|{{.State.StartedAt}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.State.ExitCode}}|{{.Config.Image}}|{{.State.Error}}' "$CODESPACE_NAME" 2> /dev/null)"; then
+        echo "  container  missing - codespace-ensure creates it within a minute"
+        echo "             (progress: sudo journalctl -u codespace-ensure -n 20)"
+        return 1
+    fi
+    IFS='|' read -r state running started restarts oom code image err <<< "$info"
+    local line="  container  $state  ${image##*:}  restarts=$restarts"
+    [ "$restarts" != 0 ] && line+="  last exit=$code"
+    [ "$oom" = true ] && line+=" (OOM-killed)"
+    echo "$line"
+    [ -n "$err" ] && echo "             error: $err"
+    if [ "$running" != true ] || [ "$state" = restarting ]; then
+        healthy=1
+        echo "             why: docker logs codespace    if it stays down: dev reset (deletes the container and its volumes)"
+    fi
+
+    case "$(codespace_mode)" in
+        web)
+            local http
+            http="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8000/ || true)"
+            if [ "$http" != 000 ] && [ -n "$http" ]; then
+                echo "  editor     up (127.0.0.1:8000)"
+            else
+                echo "  editor     not answering on 127.0.0.1:8000  (docker logs codespace)"
+                healthy=1
+            fi
+            if systemctl is-active --quiet codespace-tunnel.service; then
+                echo "  tunnel     up  restarts=$(systemctl show -p NRestarts --value codespace-tunnel.service)"
+            else
+                echo "  tunnel     $(systemctl is-active codespace-tunnel.service || true)  (sudo journalctl -u codespace-tunnel -n 20)"
+                healthy=1
+            fi
+            echo "  url        $(codespace_url)  (use your Slack link: it carries your token)"
+            ;;
+        tunnel)
+            local js tstate tname devcode
+            js="$(docker exec "$CODESPACE_NAME" /usr/share/code/bin/code-tunnel tunnel status 2> /dev/null || true)"
+            tstate="$(jq -r '.tunnel.tunnel // empty' <<< "$js" 2> /dev/null || true)"
+            tname="$(jq -r '.tunnel.name // empty' <<< "$js" 2> /dev/null || true)"
+            if [ "$tstate" = Connected ]; then
+                echo "  tunnel     connected  https://vscode.dev/tunnel/$tname/workspaces/glueops"
+            else
+                healthy=1
+                # It prints a fresh code on its own about every 15 minutes; only the latest one works.
+                devcode="$(docker logs --since "$started" "$CODESPACE_NAME" 2>&1 | grep -o 'login/device and use code [A-Z0-9-]*' | tail -n1 | awk '{print $NF}' || true)"
+                if [ -n "$devcode" ] && [ -z "$tname" ]; then
+                    echo "  tunnel     waiting for login: open https://github.com/login/device and enter $devcode"
+                else
+                    echo "  tunnel     ${tstate:-starting}  (dev logs)"
+                fi
+            fi
+            [ -s "$CODESPACE_TOKEN_FILE" ] && echo "  note       a connection token exists but the codespace is in tunnel mode: dev reset"
+            ;;
+    esac
+    echo "  disk       $(df -h --output=avail / | tail -n1 | tr -d ' ') free on /"
+    return "$healthy"
+}
+
+# Up to 30s for a codespace that is still starting. A tunnel waiting for its first login won't get
+# healthy by waiting, so stop there and show the device code.
+wait_healthy() {
+    local out
+    for _ in $(seq 1 30); do
+        out="$(status)" && return 0
+        grep -q 'waiting for login' <<< "$out" && return 1
+        sleep 1
+    done
+    return 1
+}
+
+# Runs codespace-ensure now and waits for it, showing what it does: a first create can take minutes.
+ensure_now() {
+    local follower since from=(-n 0)
+    # A run already in progress (e.g. the first boot's) logged its start before we got here; show it.
+    if [ "$(systemctl show -p ActiveState --value codespace-ensure.service)" = activating ]; then
+        since="$(systemctl show -p InactiveExitTimestamp --value codespace-ensure.service)"
+        [ -n "$since" ] && from=(--since "$since")
+    fi
+    sudo journalctl -f "${from[@]}" -o cat -u codespace-ensure.service &
+    follower=$!
+    sudo systemctl start codespace-ensure.service || echo "codespace-ensure failed; status below"
+    kill "$follower" 2> /dev/null || true
+    wait "$follower" 2> /dev/null || true
+}
+
+update_notice() {
+    local api latest current
+    api=https://api-provisioner.glueopshosted.com/v1/get-images
+    [ "$ENVIRONMENT" = nonprod ] && api=https://api-provisioner.glueopshosted.rocks/v1/get-images
+    latest="$(curl -fs --max-time 5 "$api" | jq -r '.images[0] // empty' 2> /dev/null || true)"
+    current="$(docker container inspect -f '{{.Config.Image}}' "$CODESPACE_NAME" 2> /dev/null || true)"
+    current="${current##*:}"
+    if [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ]; then
+        echo "  update     $latest is available (you have $current). Commit and push your work, then create a new codespace in Slack."
+    fi
+}
+
+logs() {
+    # In the tmux `logs` window, Ctrl-C must not close the window; anywhere else it stops dev logs. The
+    # explicit exits are needed: docker logs exits cleanly on SIGINT, so bash wouldn't stop on its own,
+    # and sudo's use_pty passes Ctrl-C only to journalctl, so bash never sees it.
+    if [ -n "${DEV_LOGS_WINDOW:-}" ]; then
+        trap 'echo; echo "(Ctrl-C does not stop anything here; detach from tmux with Ctrl-b d)"' INT
+    else
+        trap 'exit 130' INT
+    fi
+    local since="" last_start="" info running started
+    while :; do
+        case "$(codespace_mode)" in
+            web)
+                sudo journalctl -f -n 30 -u codespace-tunnel.service -u codespace-ensure.service || true
+                [ -n "${DEV_LOGS_WINDOW:-}" ] || exit 130
+                ;;
+            tunnel)
+                # The device code and tunnel link are on the container's stdout. docker logs -f exits
+                # when the container stops, so follow only while it runs, from where we left off.
+                info="$(docker container inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$CODESPACE_NAME" 2> /dev/null || true)"
+                read -r running started <<< "$info"
+                if [ "$running" = true ]; then
+                    [ "$started" != "$last_start" ] && since="$started" && last_start="$started"
+                    docker logs -f --since "$since" "$CODESPACE_NAME" 2>&1 || true
+                    since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                else
+                    sleep 5 || true
+                fi
+                ;;
+            missing)
+                echo "$(date +%T) no codespace container yet; codespace-ensure creates it"
+                sleep 10 || true
+                ;;
+        esac
+        sleep 2 || true
+    done
+}
+
+pick_tag() {
+    local api tags tag
+    api=https://api-provisioner.glueopshosted.rocks/v1/get-images
+    mapfile -t tags < <(curl -fs --max-time 10 "$api" | jq -r '.images[]' 2> /dev/null | head -n5)
+    tag="$(gum choose --header "Image tag for the new codespace:" "${tags[@]}" Custom)"
+    [ "$tag" = Custom ] && tag="$(gum input --placeholder "image tag")"
+    [ -n "$tag" ] || { echo "no tag chosen" >&2; return 1; }
+    echo "$tag"
+}
+
+reset() {
+    [ -t 0 ] && [ -t 1 ] || { echo "dev reset needs a terminal" >&2; exit 1; }
+    gum confirm "Delete the codespace container AND its home and /nix volumes, then create it again? Anything not pushed is lost." || exit 1
+    local tag=""
+    [ "$ENVIRONMENT" = nonprod ] && tag="$(pick_tag)"
+    # Stop the timer first so codespace-ensure can't recreate the container from the old tag midway.
+    sudo systemctl stop codespace-ensure.timer
+    # On exit, so a Ctrl-C during the (minutes-long) create doesn't leave the timer off until reboot. After
+    # ensure_now: restarting the timer fires a run at once, before ensure_now could start watching it.
+    trap 'sudo systemctl start codespace-ensure.timer' EXIT
+    docker rm -f "$CODESPACE_NAME" > /dev/null 2>&1 || true
+    docker volume rm codespace-home codespace-nix > /dev/null 2>&1 || true
+    [ -n "$tag" ] && echo "$tag" | sudo tee "$CODESPACE_TAG_FILE" > /dev/null
+    ensure_now
+}
+
+tmux_session() {
+    # One chained command: if two `dev`s race, the second fails on "duplicate session" and adds nothing.
+    tmux has-session -t =dev 2> /dev/null \
+        || tmux new-session -d -s dev -n logs "dev status; DEV_LOGS_WINDOW=1 dev logs" \; new-window -d -t =dev -n shell \
+        || true
+    if [ -n "${TMUX:-}" ]; then
+        tmux switch-client -t =dev
+    else
+        exec tmux attach -t =dev
+    fi
+}
+
+main() {
+    case "${1:-}" in
+        status) status ;;
+        logs) logs ;;
+        reset) reset; status || true ;;
+        "")
+            if [ -t 0 ] && [ -t 1 ]; then
+                echo "Checking the codespace..."
+                ensure_now
+                wait_healthy || true
+                status || true
+                update_notice
+                # Typed inside the `dev` session: the status above is the whole answer.
+                if [ -n "${TMUX:-}" ] && [ "$(tmux display-message -p '#S')" = dev ]; then exit 0; fi
+                tmux_session
+            else
+                # No terminal, e.g. the Slack bot's first-boot call from inside cloud-final: a blocking
+                # start would wait for cloud-final to finish, which is waiting for us.
+                sudo systemctl start --no-block codespace-ensure.service
+                status || true
+            fi
+            ;;
+        -h | --help | help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' ;;
+        *) echo "unknown command: $1 (try: dev help)" >&2; exit 2 ;;
+    esac
+}
+
+main "$@"
+CODESPACE_DEV_EOF
+
+sudo chmod 0755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/dev
+
+sudo tee /etc/systemd/system/codespace-ensure.service > /dev/null <<'CODESPACE_ENSURE_UNIT_EOF'
 [Unit]
-Description=Call dev function from .glueopsrc
-After=network-online.target docker.service cloud-final.service
-Wants=network-online.target cloud-final.service
+Description=Start or create the codespace container
+# Wanted by cloud-init.target, not multi-user.target: cloud-final.service is ordered after
+# multi-user.target, so a multi-user unit ordered after cloud-final forms an ordering cycle and
+# systemd silently drops the job at boot.
+After=network-online.target docker.service tailscaled.service cloud-final.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=oneshot
-User=vscode
-ExecStart=/bin/bash -c "source /home/vscode/.glueopsrc && dev"
-RemainAfterExit=true
+ExecStart=/usr/local/bin/codespace-ensure
+# The first create pulls the image if needed and copies the image's home into the new container.
+TimeoutStartSec=20min
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=cloud-init.target
+CODESPACE_ENSURE_UNIT_EOF
 
-EOF
+sudo tee /etc/systemd/system/codespace-ensure.timer > /dev/null <<'CODESPACE_ENSURE_TIMER_EOF'
+[Unit]
+Description=Re-check the codespace container every minute
 
-### Finish GUM install
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=60s
+AccuracySec=5s
 
+[Install]
+WantedBy=timers.target
+CODESPACE_ENSURE_TIMER_EOF
 
-dev() {
-    if ! sudo systemctl is-enabled --quiet launch-dev.service; then
-        sudo systemctl enable launch-dev.service
-    fi
-    # --- Tmux Handling ---
-    # Ensure we are inside a tmux session named 'dev'
-    if command -v tmux &> /dev/null && [ -z "$TMUX" ]; then
-        if ! tmux attach-session -t dev 2>/dev/null; then
-            gum style --padding "0 1" --foreground=245 "⏳ Creating new tmux session 'dev'..."
-            tmux new-session -s dev -d
-            tmux send-keys -t dev "dev" C-m
-            tmux attach-session -t dev
-            return 0
-        fi
-         gum style --padding "0 1" --foreground=245 "🔗 Attached to existing tmux session 'dev'."
-    fi
+sudo tee /etc/systemd/system/codespace-tunnel.service > /dev/null <<'CODESPACE_TUNNEL_UNIT_EOF'
+[Unit]
+Description=sish reverse tunnel for the codespace editor
+After=network-online.target cloud-final.service
+Wants=network-online.target
+ConditionFileNotEmpty=/etc/glueops/cde_token
+StartLimitIntervalSec=0
 
-    [ -z "$TMUX" ] && return 0
+[Service]
+User=vscode
+ExecStart=/usr/local/bin/codespace-tunnel
+Restart=always
+# Flat on purpose: RestartSteps never resets after a healthy run, so a stepped backoff ends up at
+# its maximum for every later drop.
+RestartSec=5s
+# A few MB of ssh carries everyone's access; let the kernel pick something else under memory pressure.
+OOMScoreAdjust=-500
 
-    # --- Configuration ---
-    local CONTAINER_NAME="codespace"
+[Install]
+WantedBy=cloud-init.target
+CODESPACE_TUNNEL_UNIT_EOF
 
-    # --- Fetch Tags ---
-    # Fetch tags regardless of whether container exists, to check for updates
-    gum style --padding "0 1" --margin "1 0 0 0" "⚙️ Checking latest available image tags..."
-    local api_url
-    local latest_tag_name=""
-    local all_tags=() # Initialize as empty array
+# Docker starts the container itself at boot; give tailscaled the chance to create its socket first.
+sudo install -d -m 0755 /etc/systemd/system/docker.service.d /etc/systemd/system/tailscaled.service.d
+printf '[Unit]\nAfter=tailscaled.service\n' | sudo tee /etc/systemd/system/docker.service.d/after-tailscaled.conf > /dev/null
+# Keep /run/tailscale across tailscaled restarts (e.g. upgrades) so the container's bind of it stays valid.
+printf '[Service]\nRuntimeDirectoryPreserve=yes\n' | sudo tee /etc/systemd/system/tailscaled.service.d/preserve-rundir.conf > /dev/null
 
-    if [ "${ENVIRONMENT:-prod}" = "nonprod" ]; then
-        gum style --border double --border-foreground=214 --padding "0 2" --margin "1 0" --bold \
-            "⚠️ WARNING: RUNNING IN NONPROD ENVIRONMENT ⚠️"
-        api_url="https://api-provisioner.glueopshosted.rocks/v1/get-images"
-    else
-        api_url="https://api-provisioner.glueopshosted.com/v1/get-images"
-    fi
+sudo systemctl daemon-reload
+# Enabled, not started: at image build there is no token or tag yet; the first boot starts them.
+sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel.service
 
-    local tag_json
-    tag_json=$(gum spin --spinner dot --title "Fetching available image tags..." -- \
-        curl --fail -s "$api_url"
-    )
-    local curl_exit_code=$?
-
-    if [ $curl_exit_code -ne 0 ]; then
-        gum style --padding "0 1" --foreground=196 --bold \
-            "❌ ERROR:" "Failed to fetch tags from $api_url (curl exit code: $curl_exit_code)." >&2
-        gum style --padding "0 1" --foreground=214 "⚠️ Warning: Cannot check for newer versions. Proceeding..."
-        latest_tag_name="" # Ensure it's empty if fetch failed
-    else
-        # Get *all* tags first (assuming API returns sorted newest first)
-        mapfile -t all_tags < <(echo "$tag_json" | jq -r '.images[]')
-        if [ ${#all_tags[@]} -eq 0 ]; then
-           gum style --padding "0 1" --foreground=214 \
-            "⚠️ Warning: No tags found from API. Cannot check for newer versions."
-           latest_tag_name="" # Ensure it's empty if no tags found
-        else
-           # Identify the absolute latest tag
-           latest_tag_name="${all_tags[0]}"
-           gum style --padding "0 1" --foreground=40 "✅ Latest available tag: $(gum style --bold "$latest_tag_name")"
-        fi
-    fi
-
-    # --- Check if Container Exists ---
-    gum style --padding "0 1" --margin "1 0 0 0" "🔎 Checking for existing container '$CONTAINER_NAME'..."
-    if sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        # --- Container Exists ---
-        gum style --border normal --border-foreground=226 --padding "0 2" --margin "1 0" \
-            "✅ Container '$CONTAINER_NAME' already exists." # Yellow border for info
-
-        local STATUS; STATUS=$(sudo docker inspect -f '{{.State.Status}}' "$CONTAINER_NAME")
-        local IMAGE_NAME_TAG; IMAGE_NAME_TAG=$(sudo docker inspect -f '{{.Config.Image}}' "$CONTAINER_NAME")
-        # Extract tag from image string (e.g., image:tag -> tag)
-        local existing_tag="${IMAGE_NAME_TAG#*:}"
-
-        gum style --padding "0 1" --foreground=226 \
-            "📦 Using existing image: $(gum style --bold "$IMAGE_NAME_TAG")"
-
-        # --- Check for Newer Version ---
-        if [[ -n "$latest_tag_name" && "$existing_tag" != "$latest_tag_name" ]]; then
-            gum style --border double --border-foreground=214 --padding "1 2" --margin "1 0" \
-                "🟠 UPDATE AVAILABLE! 🟠" \
-                "" \
-                "Your version:     $(gum style --bold "$existing_tag")" \
-                "Latest version:   $(gum style --bold "$latest_tag_name")" \
-                "" \
-                "Consider deleting this environment and creating a" \
-                "new one via Slack to get the latest updates." \
-                "" \
-                "$(gum style --bold --foreground=196 '⚠️ IMPORTANT:') Before deleting, ensure you" \
-                "   $(gum style --bold --foreground=226 'commit')$(gum style --bold --foreground=196 ' and ')$(gum style --bold --foreground=226 'push')$(gum style --bold --foreground=196 ' ALL your work. Anything stored')" \
-                "   only in this codespace $(gum style --bold --foreground=196 'will be lost.')"
-
-            sleep 5
-        elif [[ -n "$latest_tag_name" && "$existing_tag" == "$latest_tag_name" ]]; then
-             gum style --padding "0 1" --foreground=40 "👍 You are running the latest version ($existing_tag)."
-        fi
-        # --- End Check for Newer Version ---
-
-
-        if [ "$STATUS" = "running" ]; then
-            gum style --padding "0 1" --foreground=40 "✅ Container is already running."
-        else
-            gum style --padding "0 1" --foreground=214 "🟡 Container is stopped. Attempting to start..."
-            if ! gum spin --spinner dot --title "Starting existing container..." -- \
-                sudo docker start "$CONTAINER_NAME"; then
-                 gum style --padding "0 1" --foreground=196 --bold \
-                    "❌ ERROR:" "Failed to start existing container '$CONTAINER_NAME'." >&2
-                 return 1
-            fi
-             gum style --padding "0 1" --foreground=40 "✅ Container started successfully."
-        fi
-
-    else
-        # --- Container Does Not Exist ---
-        # We already fetched tags, need latest_tag_name and all_tags
-        # allow images to be selected in the nonprod environment
-        if [ "${ENVIRONMENT:-prod}" = "nonprod" ]; then
-            if [[ -z "$latest_tag_name" ]]; then
-                gum style --padding "0 1" --foreground=196 --bold \
-                    "❌ ERROR:" "Cannot proceed without available image tags from API." >&2
-                return 1
-            fi
-
-            gum style --border normal --border-foreground=226 --padding "0 2" --margin "1 0" \
-                "🔎 Container '$CONTAINER_NAME' does not exist. Proceeding with setup."
-
-            # Take the top 5 tags for display list
-            mapfile -t tags_to_display < <(printf "%s\n" "${all_tags[@]}" | head -5)
-
-            # --- Check Cached Images ---
-            local cached_images
-            cached_images=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep "ghcr.repo.gpkg.io/glueops/codespaces")
-
-            # --- Prepare Options for Gum (Using Simplified Markers) ---
-            local options=()
-
-            for tag in "${tags_to_display[@]}"; do
-                local display_tag="$tag" # Base display tag is just the tag name
-                local is_latest=false
-                local is_cached=false
-
-                if [[ "$tag" == "$latest_tag_name" ]]; then
-                    is_latest=true
-                fi
-                if echo "$cached_images" | grep -q ":${tag}$"; then
-                    is_cached=true
-                fi
-
-                local marker=""
-                if $is_latest && $is_cached; then marker=" [L, C]";
-                elif $is_latest; then marker=" [L]";
-                elif $is_cached; then marker=" [C]"; fi
-                display_tag="$tag$marker"
-
-                options+=("$display_tag")
-            done
-            options+=("Custom")
-
-            # --- Use Gum Choose for Selection ---
-            local selected_option
-            selected_option=$(gum choose \
-                --header "Please select a tag ([L]=Latest, [C]=Cached):" \
-                --height 10 \
-                "${options[@]}"
-            )
-            if [ $? -ne 0 ]; then gum style --padding "0 1" --foreground=214 "🟡 Selection cancelled."; return 1; fi
-            if [ -z "$selected_option" ]; then gum style --padding "0 1" --foreground=196 --bold "❌ ERROR:" "No option selected." >&2; return 1; fi
-
-            # --- Handle Selection (Using sed for Cleaning) ---
-            local selected_tag
-
-            if [ "$selected_option" == "Custom" ]; then
-                selected_tag=$(gum input --placeholder "Enter custom tag:" --prompt "$(gum style --bold 'Custom Tag >') ")
-                if [ $? -ne 0 ] || [ -z "$selected_tag" ]; then gum style --padding "0 1" --foreground=214 "🟡 Custom tag entry cancelled or empty."; return 1; fi
-                gum style --padding "0 1" "🏷️ Using custom tag: $(gum style --bold "$selected_tag")"
-            else
-                selected_tag=$(echo "$selected_option" | sed -e 's/ \[L, C\]$//' -e 's/ \[L\]$//' -e 's/ \[C\]$//')
-                selected_tag="${selected_tag%"${selected_tag##*[![:space:]]}"}"
-                selected_tag="${selected_tag#"${selected_tag%%*[![:space:]]}"}"
-                gum style --padding "0 1" "🏷️ Selected tag: $(gum style --bold "$selected_tag")"
-            fi
-
-            export CONTAINER_TAG_TO_USE="$selected_tag"
-        fi
-        # --- Create Container ---
-        mkdir -p /workspaces/glueops # Silent
-
-        gum style --padding "0 1" --foreground=226 \
-            "🧼 Creating and starting new container '$CONTAINER_NAME' with tag $(gum style --bold "$CONTAINER_TAG_TO_USE")..."
-
-        # Guarantee the env-file exists so `docker run --env-file` never errors.
-        # This is idempotent and non-truncating: if cloud-init (or an operator)
-        # already wrote KEY=VALUE lines here, they are preserved; if the file is
-        # absent it is created empty (docker treats an empty file as zero vars).
-        # The SAME docker run command below works whether the file is empty or populated.
-        sudo mkdir -p /etc/glueops
-        sudo touch /etc/glueops/codespace.env
-        sudo chmod 600 /etc/glueops/codespace.env
-
-        if ! gum spin --spinner dot --title "Creating container '$CONTAINER_NAME'..." --show-output -- \
-            sudo docker run -itd --name "$CONTAINER_NAME" \
-                --net=host \
-                --cap-add=SYS_PTRACE \
-                --security-opt seccomp=unconfined \
-                --privileged \
-                --init \
-                --device=/dev/net/tun \
-                -u "$(id -u):$(getent group docker | cut -d: -f3 || echo $(id -g))" \
-                -v /workspaces/glueops:/workspaces/glueops \
-                -v /var/run/docker.sock:/var/run/docker.sock \
-                -v /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock \
-                --env-file /etc/glueops/codespace.env \
-                -w /workspaces/glueops \
-                "ghcr.repo.gpkg.io/glueops/codespaces:${CONTAINER_TAG_TO_USE}" bash; then
-             gum style --padding "0 1" --foreground=196 --bold \
-                "❌ ERROR:" "Failed to create or start container '$CONTAINER_NAME' with tag '$CONTAINER_TAG_TO_USE'." >&2
-             # Added suggestion from previous step, kept simple
-             gum style --padding "0 1" --foreground=214 \
-                "🤔 Suggestion: Verify the tag exists and is accessible, or try a different tag." >&2
-             sudo docker rm "$CONTAINER_NAME" &>/dev/null
-             return 1
-        fi
-        gum style --padding "0 1" --foreground=40 \
-            "✅ Container '$CONTAINER_NAME' created and started."
-    fi # End of container exists check
-
-    # --- Exec into Container ---
-    local LOG_OPTIONS="--log off"
-    if [ "$CODESPACE_ENABLE_VERBOSE_LOGS" = "true" ]; then
-      LOG_OPTIONS="--verbose --log trace"
-    fi
-
-    gum style --border normal --border-foreground=240 --padding "0 2" --margin "1 0" \
-        "🚀 Executing 'code tunnel' inside the container..."
-    tmux switch-client -r
-
-    if [ ! -f ~/.ssh/sish_tunnel_key_id_ed25519 ]; then
-        ssh-keygen -t ed25519 -f ~/.ssh/sish_tunnel_key_id_ed25519 -N "" -C "sish_tunnel_key"
-        chmod 600 ~/.ssh/sish_tunnel_key_id_ed25519
-        chmod 644 ~/.ssh/sish_tunnel_key_id_ed25519.pub
-    fi
-    
-    export AUTOSSH_GATETIME=0
-    
-    PID_FILE="/tmp/sish_tunnel.pid"
-    # check for existing pid and kill it
-    if [ -f "$PID_FILE" ]; then
-        OLD_PID=$(cat "$PID_FILE")
-        
-        # Check if process with this PID is actually running
-        if kill -0 "$OLD_PID" 2>/dev/null; then
-            echo "Stopping existing tunnel (PID: $OLD_PID)..."
-            kill "$OLD_PID"
-            # Optional: Wait a moment for it to close cleanly
-            sleep 1
-        else
-            echo "Found PID file, but process $OLD_PID is not running. Cleaning up."
-        fi
-        
-        # Remove the old file
-        rm "$PID_FILE"
-    fi
-    
-    [ -f /etc/glueops/cde_token ] && export CDE_TOKEN=$(cat /etc/glueops/cde_token)
-
-    # Regional sish endpoint written by cloud-init on newer VMs; older VMs
-    # have no file and stay on the legacy central tunnel.
-    TUNNEL_ENDPOINT="tunnels.glueopshosted.com"
-    if [ -s /etc/glueops/tunnel_endpoint ]; then
-        _regional_endpoint="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
-        [ -n "$_regional_endpoint" ] && TUNNEL_ENDPOINT="$_regional_endpoint"
-    fi
-
-    # Legacy central sish runs --append-user-to-subdomain: bind "cde" + the
-    # SSH username -> cde-<hostname>.tunnels.glueopshosted.com. Regional
-    # instances don't; the VM binds its bare hostname so URLs are just
-    # <hostname>.<region>.tunnels.cde.glueopshosted.com. The slackbot derives
-    # the access URL from the same endpoint-value rule, so keep them in sync.
-    TUNNEL_BIND="cde"
-    [ "$TUNNEL_ENDPOINT" != "tunnels.glueopshosted.com" ] && TUNNEL_BIND="$HOSTNAME"
-
-    # Bootstrap the CDE once per container: cde-boot runs CDE_SETUP_SCRIPT (unset -> the
-    # default `cde-init`: gh auth + repo clone + AutoGlue setup). Non-fatal, and a no-op on
-    # older container images that predate cde-boot.
-    # Pass the env at EXEC time (not just the container's frozen create-time --env-file) so a
-    # later profile/secret edit reaches a forced re-run, and secrets are scoped to this exec.
-    ENVFILE_ARG=""
-    [ -f /etc/glueops/codespace.env ] && ENVFILE_ARG="--env-file /etc/glueops/codespace.env"
-    # shellcheck disable=SC2086 # ENVFILE_ARG must word-split into flag + path (or nothing)
-    sudo docker exec $ENVFILE_ARG "$CONTAINER_NAME" bash -lc 'command -v cde-boot >/dev/null 2>&1 && cde-boot || true' || true
-
-    if [ -n "$CDE_TOKEN" ]; then
-        # IdentitiesOnly keeps a forwarded ssh-agent (present when dev is
-        # re-run from a tmux session after an SSH login) from offering its
-        # keys first: sish's TOFU auth permanently pins the first accepted
-        # key per username, so an agent key winning the first-ever connection
-        # locks the VM out once that agent is gone. It also avoids blowing
-        # the server's MaxAuthTries budget on agent keys.
-        AUTOSSH_PIDFILE="$PID_FILE" autossh -M 0 -f -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -i ~/.ssh/sish_tunnel_key_id_ed25519 -p 2222 -l $HOSTNAME -R "$TUNNEL_BIND":80:localhost:8000 "$TUNNEL_ENDPOINT"
-        # Disable VS Code Workspace Trust so folders open without the "Do you trust the
-        # authors…" prompt. Normally a no-op (the server is baked + shimmed at image build);
-        # re-shims if a VS Code update pulled a new server. If the prompt comes back, see the
-        # "IF THIS BREAKS" block in .devcontainer/tools/cde-trust-serve-web.sh. Non-fatal, and
-        # a no-op on older images without the tool.
-        sudo docker exec "$CONTAINER_NAME" bash -lc 'command -v cde-trust-serve-web >/dev/null 2>&1 && cde-trust-serve-web || true' || true
-        sudo docker exec -it "$CONTAINER_NAME" bash -c "code serve-web --host 0.0.0.0 --accept-server-license-terms --port 8000 --connection-token $CDE_TOKEN"
-    else
-        sudo docker exec -it "$CONTAINER_NAME" bash -c "code tunnel --random-name $LOG_OPTIONS"
-    fi
-
-    local exec_status=$?
-    if [ $exec_status -ne 0 ]; then
-        gum style --padding "0 1" --foreground=214 \
-            "👋 'code tunnel' exited (status: $exec_status)."
-    fi
-
-    return $exec_status
-}
-
-GLUEOPSRC="$(declare -f dev)"
 # Fetch latest release if GLUEOPS_CODESPACES_CONTAINER_TAG is not set
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set. Fetching latest release..."
   GLUEOPS_CODESPACES_CONTAINER_TAG=$(curl -fsSL "https://api.github.com/repos/GlueOps/codespaces/releases/latest" | jq -r '.tag_name')
-  
+
   if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ] || [ "$GLUEOPS_CODESPACES_CONTAINER_TAG" == "null" ]; then
-    echo "WARNING: Failed to fetch latest release tag. CONTAINER_TAG_TO_USE will be empty."
+    echo "WARNING: Failed to fetch latest release tag. The codespace won't start until a tag is written to /etc/glueops/codespace-tag."
+    GLUEOPS_CODESPACES_CONTAINER_TAG=""
   else
     echo "Using latest release version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   fi
 fi
-echo "export CONTAINER_TAG_TO_USE=$GLUEOPS_CODESPACES_CONTAINER_TAG" | sudo tee -a /home/vscode/.glueopsrc
-echo "$GLUEOPSRC" | sudo tee -a /home/vscode/.glueopsrc
+# The image tag codespace-ensure creates the container from; `dev reset` can change it on nonprod.
+[ -n "$GLUEOPS_CODESPACES_CONTAINER_TAG" ] && echo "$GLUEOPS_CODESPACES_CONTAINER_TAG" | sudo tee /etc/glueops/codespace-tag > /dev/null
+# Kept, empty: the Slack bot's first-boot cloud-init runs `source ~/.glueopsrc; dev`.
+echo "# dev is /usr/local/bin/dev; this file is kept for callers that still source it." | sudo tee /home/vscode/.glueopsrc > /dev/null
 
-dev() {
-    if [ "$(whoami)" != "vscode" ]; then
-        echo -e "\033[1;31m⚠️  You are not the 'vscode' user. Switching to 'vscode' and running 'dev' \033[0m"
-        exec su - vscode -c "bash -i -c dev"
-    else
-        echo "You are already the 'vscode' user."
-    fi
-}
-
-ROOTBASHRC="$(declare -f dev)"
-echo "$ROOTBASHRC" | sudo tee -a /root/.bashrc
-
-
-
-echo "source /home/vscode/.glueopsrc" | sudo tee -a /home/vscode/.bashrc
 sudo chown -R vscode:vscode /home/vscode
 sudo mkdir -p /workspaces
 sudo chown -R vscode:vscode /workspaces
@@ -451,19 +561,22 @@ server_ip=$(echo $SSH_CONNECTION | awk '{print $3}')
 echo ""
 echo ""
 #sudo figlet GlueOps | sudo tee /etc/motd
-{ echo -e "\e[1;32m$(figlet GlueOps)\e[0m"; echo ""; echo -e "\e[1;34mTo get your codespace started, run the following command:\e[0m"; echo ""; echo -e "\e[1;33m    dev\e[0m"; echo ""; } | sudo tee /etc/motd
+{ echo -e "\e[1;32m$(figlet GlueOps)\e[0m"; echo ""; echo -e "\e[1;34mYour codespace starts automatically. To check on it or repair it, run:\e[0m"; echo ""; echo -e "\e[1;33m    dev\e[0m"; echo ""; } | sudo tee /etc/motd
 
 #Install tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 
 
 
-if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
-  echo "GLUEOPS_CODESPACES_CONTAINER_TAG is not set."
-  echo "Please manually run: docker pull ghcr.repo.gpkg.io/glueops/codespaces:<TAG> before you run 'dev'"
-else
+if [ -n "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then
   echo "Pulling down codespace version: $GLUEOPS_CODESPACES_CONTAINER_TAG"
   until sudo docker pull ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG; do echo "Docker pull failed, retrying in 20 seconds..."; sleep 20; done
+
+  # Fill the codespace's home and /nix volumes now: Docker copies the image's content into a new volume
+  # on first mount, which takes minutes and would otherwise hold up the codespace's first start.
+  echo "Filling the codespace-home and codespace-nix volumes"
+  sudo docker run --rm --entrypoint true -v codespace-home:/home/vscode -v codespace-nix:/nix \
+      "ghcr.repo.gpkg.io/glueops/codespaces:$GLUEOPS_CODESPACES_CONTAINER_TAG"
 
   # Pre-warm the Ansible shell image (used by gluekube_ssh --ansible) so the
   # first use on a fresh VM doesn't pay a ~300MB pull. The digest-pinned
