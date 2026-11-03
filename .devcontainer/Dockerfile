@@ -298,8 +298,12 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
 # Code version bump changed the server. See the "IF THIS BREAKS" troubleshooting block in
 # .devcontainer/tools/cde-trust-serve-web.sh for the exact checks (launcher shape, the flag,
 # the workbench gate) and how to fix it.
+# Only a finished server counts: a "<hash>.staging-*" leftover is an unfinished download serve-web never uses.
 RUN cde-trust-serve-web \
-    && grep -q 'cde-trust-serve-web shim' /home/vscode/.vscode/cli/serve-web/*/bin/code-server
+    && d="$(ls -d /home/vscode/.vscode/cli/serve-web/*/ | grep -v '\.staging')" \
+    && [ "$(echo "$d" | wc -l)" = 1 ] \
+    && grep -q 'cde-trust-serve-web shim' "${d}bin/code-server" \
+    && ! ls -d /home/vscode/.vscode/cli/serve-web/*.staging* 2> /dev/null
 
 USER root
 RUN mkdir -p /home/vscode/.kube && chmod 0700 /home/vscode/.kube

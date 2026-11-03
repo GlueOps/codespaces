@@ -157,7 +157,9 @@ create() {
     local cmd
     if [ -s "$CODESPACE_TOKEN_FILE" ]; then
         # stdout carries "Web UI available at ...?tkn=<token>", so it goes nowhere; errors are on stderr.
-        cmd='[ -s /etc/glueops/cde_token ] || exit 1; cde-trust-serve-web || true; exec /usr/share/code/bin/code-tunnel serve-web --host 127.0.0.1 --port 8000 --accept-server-license-terms --connection-token-file /etc/glueops/cde_token > /dev/null'
+        # --commit-id pins the server baked into the image: without it serve-web fetches each new VS Code
+        # release on a browser connect (~700 MB) and runs it without cde-trust-serve-web's shim.
+        cmd='[ -s /etc/glueops/cde_token ] || exit 1; cde-trust-serve-web || true; d=$(ls -d "$HOME"/.vscode/cli/serve-web/*/ 2> /dev/null | grep -v "\.staging" | tail -n 1); d=${d%/}; c=${d##*/}; exec /usr/share/code/bin/code-tunnel serve-web ${c:+--commit-id "$c"} --host 127.0.0.1 --port 8000 --accept-server-license-terms --connection-token-file /etc/glueops/cde_token > /dev/null'
     else
         cmd='exec /usr/share/code/bin/code-tunnel tunnel --random-name --accept-server-license-terms'
     fi

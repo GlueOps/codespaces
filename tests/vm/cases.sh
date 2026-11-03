@@ -43,6 +43,20 @@ if grep -q -- '--host 127.0.0.1' "$STATE/cmd" && grep -q -- '--connection-token-
     pass "  token: main process is serve-web on 127.0.0.1 with the token file"
     if grep -qF -- '--connection-token-file /etc/glueops/cde_token > /dev/null' "$STATE/cmd"; then pass "  serve-web stdout (it prints the token) is discarded"; else fail "  serve-web stdout (it prints the token) is discarded"; fi
 else fail "  token: main process is serve-web on 127.0.0.1 with the token file ($(cat "$STATE/cmd"))"; fi
+# Run the container's command for real against a fake home: it must pin the finished server, never a
+# staging (unfinished) download, and pass no --commit-id when nothing is baked.
+container_cmd="$(jq -r '.[2]' "$STATE/cmd")"
+fake_home=/tmp/fake-home; sw=$fake_home/.vscode/cli/serve-web
+rm -rf "$fake_home"; mkdir -p "$sw/aaa111/bin" "$sw/bbb222.staging-0f0f/bin" /usr/share/code/bin
+printf '#!/bin/sh\necho "code-tunnel $*" >&2\n' > /usr/share/code/bin/code-tunnel  # stderr: stdout is discarded
+printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/cde-trust-serve-web
+chmod +x /usr/share/code/bin/code-tunnel /usr/local/bin/cde-trust-serve-web
+pinned="$(HOME=$fake_home bash -c "$container_cmd" 2>&1)"
+if grep -qF -- "serve-web --commit-id aaa111 --host" <<< "$pinned"; then pass "  pins serve-web to the finished baked server"; else fail "  pins serve-web to the finished baked server ($pinned)"; fi
+rm -rf "$sw/aaa111"
+pinned="$(HOME=$fake_home bash -c "$container_cmd" 2>&1)"
+if grep -q -- "--commit-id" <<< "$pinned"; then fail "  only a staging download: no --commit-id ($pinned)"; else pass "  only a staging download: no --commit-id"; fi
+rm -rf "$fake_home" /usr/share/code /usr/local/bin/cde-trust-serve-web
 expect_call "  runs cde-boot after create" "docker exec --env-file /etc/glueops/codespace.env codespace"
 if grep -qF "CDE-BOOT-OUTPUT" <<< "$out"; then fail "  cde-boot output kept out of the journal"; else pass "  cde-boot output kept out of the journal"; fi
 expect_call "  starts the tunnel when a token exists" "systemctl start --no-block codespace-tunnel.service"

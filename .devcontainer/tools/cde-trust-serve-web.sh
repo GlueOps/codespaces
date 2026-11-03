@@ -69,11 +69,12 @@ SHIM_MARK='cde-trust-serve-web shim'
 # Remove any temp file we might leave behind if interrupted mid-write (PID-scoped).
 trap 'rm -f "$SW"/*/bin/code-server.tmp."$$" 2>/dev/null || true' EXIT
 
-# True when a fully-extracted server wrapper exists (ignore the transient "<hash>.staging" dir).
+# True when a fully-extracted server wrapper exists. serve-web extracts into "<hash>.staging-<uuid>"
+# (older versions: "<hash>.staging") and renames it to "<hash>" only when done, so skip those.
 server_present() {
     local f
     for f in "$SW"/*/bin/code-server; do
-        case "$f" in *".staging/"*) continue ;; esac
+        case "$f" in *".staging"*) continue ;; esac
         [ -f "$f" ] && return 0
     done
     return 1
@@ -131,7 +132,7 @@ fi
 
 changed=0
 for cs in "$SW"/*/bin/code-server; do
-    case "$cs" in *".staging/"*) continue ;; esac
+    case "$cs" in *".staging"*) continue ;; esac
     [ -f "$cs" ] || continue
     grep -qF "$SHIM_MARK" "$cs" 2>/dev/null && continue
     if shim_one "$cs"; then
