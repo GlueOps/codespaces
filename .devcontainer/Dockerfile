@@ -298,7 +298,8 @@ RUN echo '\n# === Backup & Git Reminder ===' | tee -a /home/vscode/.zshrc && \
 # Code version bump changed the server. See the "IF THIS BREAKS" troubleshooting block in
 # .devcontainer/tools/cde-trust-serve-web.sh for the exact checks (launcher shape, the flag,
 # the workbench gate) and how to fix it.
-# Only a finished server counts: a "<hash>.staging-*" leftover is an unfinished download serve-web never uses.
+# Only a finished server counts: a "<hash>.staging-*" leftover is an unfinished download serve-web never
+# uses, so one left behind means the pre-bake failed (and would only add dead weight to the image).
 RUN cde-trust-serve-web \
     && d="$(ls -d /home/vscode/.vscode/cli/serve-web/*/ | grep -v '\.staging')" \
     && [ "$(echo "$d" | wc -l)" = 1 ] \

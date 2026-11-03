@@ -173,6 +173,22 @@ run script -qec dev /dev/null
 if [ $((SECONDS - start)) -lt 15 ]; then pass "TTY, waiting for login: shows the code without waiting for health"; else fail "TTY, waiting for login: took $((SECONDS - start))s"; fi
 if grep -qF "CCCC-3333" <<< "$out"; then pass "  prints the device code"; else fail "  prints the device code"; fi
 
+echo "== cde-trust-serve-web (the image's serve-web pre-bake)"
+# serve-web extracts into "<hash>.staging-<uuid>" and renames it when done; a staging dir must never
+# count as the server. The fake `code` stands in for that download: it creates the finished dir.
+th=/tmp/trust-home; tsw=$th/.vscode/cli/serve-web
+printf '#!/bin/sh\necho "Web UI available at http://127.0.0.1:9"\nmkdir -p "$HOME/.vscode/cli/serve-web/ddd444/bin"\nprintf "#!/bin/sh\\n" > "$HOME/.vscode/cli/serve-web/ddd444/bin/code-server"\nexec sleep 30\n' > /usr/local/bin/code
+chmod +x /usr/local/bin/code
+shimmed() { grep -q 'cde-trust-serve-web shim' "$tsw/$1/bin/code-server"; }
+rm -rf "$th"; mkdir -p "$tsw/aaa111/bin" "$tsw/bbb222.staging-0f0f/bin"
+for d in aaa111 bbb222.staging-0f0f; do printf '#!/bin/sh\n' > "$tsw/$d/bin/code-server"; done
+HOME=$th bash .devcontainer/tools/cde-trust-serve-web.sh > /dev/null 2>&1
+if shimmed aaa111 && ! shimmed bbb222.staging-0f0f; then pass "finished server shimmed, staging download left alone"; else fail "finished server shimmed, staging download left alone"; fi
+rm -rf "$th"; mkdir -p "$tsw/ccc333.staging-0f0f/bin"; printf '#!/bin/sh\n' > "$tsw/ccc333.staging-0f0f/bin/code-server"
+HOME=$th timeout 60 bash .devcontainer/tools/cde-trust-serve-web.sh > /dev/null 2>&1
+if shimmed ddd444 && ! shimmed ccc333.staging-0f0f; then pass "only a staging download: waits for the finished server and shims it"; else fail "only a staging download: waits for the finished server and shims it"; fi
+rm -rf "$th" /usr/local/bin/code
+
 echo "== no output contains the token"
 if grep -qF "$TOKEN" <<< "$all_output$(cat "$STATE/calls")"; then fail "token value found in output"; else pass "token never printed"; fi
 

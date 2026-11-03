@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'developer-setup.sh'
+      - '.devcontainer/tools/cde-trust-serve-web.sh'
       - 'tests/vm/**'
       - 'hack/test-codespace-vm.sh'
       - 'hack/test.sh'

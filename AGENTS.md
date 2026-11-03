@@ -44,6 +44,9 @@ Settled; reviewers shouldn't re-raise these.
 - No automatic recreate of a container that won't start; `dev status` points to `dev reset`.
 - The home and `/nix` volumes keep the home contents from the image tag they were first created with, even if a newer
   tag later runs on the same VM. Upgrading means a new VM. Volumes are not a backup.
+- The browser editor's VS Code server is pinned (`serve-web --commit-id`) to the one baked into the image: a VM gets no
+  VS Code updates in place, including security releases, until a new VM. In exchange there's no ~700 MB download on a
+  browser connect and the workspace-trust shim always applies.
 - Credentials kept in the home volume survive a container recreate. `dev reset` removes them.
 - The sish tunnel keeps `StrictHostKeyChecking=no` with `UserKnownHostsFile=/dev/null`: sish host keys may change.
 - serve-web listens on 127.0.0.1 only; nobody uses :8000 on the tailnet IP.
