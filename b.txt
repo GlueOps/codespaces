@@ -1,0 +1,24 @@
+. vscode:vscode 750 d  4 Tue Nov  3 02:25:35.0406622950 2026
+./.bash_logout vscode:vscode 644 f  1 Thu May  7 20:33:02.0000000000 2026
+./.bashrc vscode:vscode 644 f  1 Thu May  7 20:33:02.0000000000 2026
+./.config vscode:vscode 755 d  3 Tue Nov  3 02:25:35.0366622970 2026
+./.config/empty vscode:vscode 755 d  2 Tue Nov  3 02:22:00.0000000000 2026
+./.nix-profile vscode:vscode 777 l /nix/var/nix/profiles/default 1 Tue Nov  3 02:22:00.0000000000 2026
+./.profile vscode:vscode 644 f  1 Thu May  7 20:33:02.0000000000 2026
+./.ssh vscode:vscode 700 d  2 Tue Nov  3 02:22:00.0000000000 2026
+./broken vscode:vscode 777 l dangling 1 Tue Nov  3 02:22:00.0000000000 2026
+./capbin vscode:vscode 755 f  1 Tue Nov  3 02:22:00.0000000000 2026
+./f vscode:vscode 644 f  2 Wed Jan  1 00:00:00.0000000000 2020
+./hard vscode:vscode 644 f  2 Wed Jan  1 00:00:00.0000000000 2020
+./suid root:root 4755 f  1 Tue Nov  3 02:22:00.0000000000 2026
+/home/vscode 1337:1337 750
+/nix 1337:1337 755
+. vscode:vscode 755 d 
+./store vscode:vscode 1775 d 
+./store/abc-pkg vscode:vscode 755 d 
+./store/abc-pkg/bin vscode:vscode 755 d 
+./store/abc-pkg/bin/tool vscode:vscode 555 f 
+./var vscode:vscode 755 d 
+./var/nix vscode:vscode 755 d 
+./var/nix/profiles vscode:vscode 755 d 
+./var/nix/profiles/default root:root 777 l /nix/store/abc-pkg

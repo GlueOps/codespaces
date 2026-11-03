@@ -147,8 +147,7 @@ create() {
 
     # Home and /nix live in named volumes so a recreated container keeps dotfiles, logins and
     # devbox/nix packages. Docker copies the image's content into each volume once, while it's empty;
-    # the two go together because the nix profile links in home point into /nix. The image build
-    # fills them ahead of time; after `dev reset` the copy happens here and takes minutes.
+    # the two go together because the nix profile links in home point into /nix.
     docker volume inspect codespace-home > /dev/null 2>&1 \
         || echo "first start: copying the image's home and /nix into new volumes; this takes a few minutes"
 
@@ -337,15 +336,13 @@ wait_healthy() {
 
 # Runs codespace-ensure now and waits for it, showing what it does: a first create can take minutes.
 ensure_now() {
-    local follower since=""
+    local follower since from=(-n 0)
     # A run already in progress (e.g. the first boot's) logged its start before we got here; show it.
-    [ "$(systemctl show -p ActiveState --value codespace-ensure.service)" = activating ] \
-        && since="$(systemctl show -p InactiveExitTimestamp --value codespace-ensure.service)"
-    if [ -n "$since" ]; then
-        sudo journalctl -f --since "$since" -o cat -u codespace-ensure.service &
-    else
-        sudo journalctl -f -n 0 -o cat -u codespace-ensure.service &
+    if [ "$(systemctl show -p ActiveState --value codespace-ensure.service)" = activating ]; then
+        since="$(systemctl show -p InactiveExitTimestamp --value codespace-ensure.service)"
+        [ -n "$since" ] && from=(--since "$since")
     fi
+    sudo journalctl -f "${from[@]}" -o cat -u codespace-ensure.service &
     follower=$!
     sudo systemctl start codespace-ensure.service || echo "codespace-ensure failed; status below"
     kill "$follower" 2> /dev/null || true

@@ -72,6 +72,14 @@ if grep -qi 'ordering cycle' <<< "$(verify)"; then echo "  ok   old launch-dev.s
     echo "  FAIL: the cycle check no longer detects the old launch-dev.service cycle" >&2; exit 1; fi
 systemctl disable launch-dev.service 2> /dev/null; rm /etc/systemd/system/launch-dev.service
 
+# The image build fills the volumes ahead of time; if its mounts drift from codespace-ensure's, the fill
+# lands in volumes nobody uses and first starts are slow again.
+echo "== volume prefill matches codespace-ensure"
+vols='-v codespace-home:/home/vscode -v codespace-nix:/nix'
+if grep -qF -- "--entrypoint true $vols" developer-setup.sh && grep -qF -- "$vols \\" /usr/local/bin/codespace-ensure; then
+    echo "  ok   same volumes and mount points"
+else echo "  FAIL: the build-time volume fill and codespace-ensure use different volumes" >&2; exit 1; fi
+
 echo "== behaviour"
 install -m 755 tests/vm/stubs/* /usr/local/bin/
 bash tests/vm/cases.sh
