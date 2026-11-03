@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    # 8 vCPU / 32 GB, the same runner as the Packer build: more CPU for the ~9 min image build.
+    # The same large runner as the Packer build: more CPU for the ~9 min image build.
     runs-on: public-XXL
     steps:
       - name: Debug Print Ref Info

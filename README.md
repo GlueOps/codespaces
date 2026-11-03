@@ -128,7 +128,7 @@ To test a `pre-release` you will first to do the following:
 
 # Local Dev / Running packer locally:
 
-It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command. The qemu build compresses the image with zstd, so it needs `qemu-img` 5.1 or newer (as does anything that reads the image).
+It's best to just reference the github workflows under `.github/workflows` the packer workflows for each respective cloud start with `packer-*`. For each respective cloud you will notice env variables are being passed into a github action step. To do this locally, you will need to create credentials for the respective cloud and then `export` the applicable environment variables before running the `packer build` command. The qemu build compresses the image with zstd, so it needs `qemu-img` 5.1 or newer (as does anything that reads the image). Its build VM uses 24 GB of RAM and 8 vCPUs; lower `-m`/`-smp` in `qemu.pkr.hcl` on a smaller host.
 
 ### Break Glass Setup
 
