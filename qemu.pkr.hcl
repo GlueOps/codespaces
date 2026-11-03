@@ -18,6 +18,8 @@ source "qemu" "qemu-amd64" {
   ssh_username      = "debian"
   ssh_password      = "${var.image_password}"
   shutdown_command  = "sudo fstrim -av && sudo shutdown -P now"
+  # The post-processor's zstd qemu-img convert already compacts the image.
+  skip_compaction   = true
   headless          = true
   ssh_wait_timeout  = "5m"
   vnc_port_min      = 5901
