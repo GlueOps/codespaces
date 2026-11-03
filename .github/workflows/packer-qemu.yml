@@ -76,25 +76,20 @@ jobs:
           verbose: false
           arch: amd64 
 
-      - name: Upload .qcow2 to S3
-        run: |
-          aws s3 cp images/${{ github.event.workflow_run.head_branch }}.qcow2 s3://${{ secrets.S3_BUCKET }}/${{ github.event.workflow_run.head_branch }}.qcow2 --acl public-read
-        env: 
+      - name: Upload the qcow2 to S3 and, split into 1024M parts, to GitHub Releases
+        # tar -C, not mv: the background S3 upload is still reading images/$TAG.qcow2.
+        # -P 4: one part upload at a time took ~4 min.
+        env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ secrets.S3_BUCKET_REGION }}
-
-
-      - name: Split qcow2 image into 1024M files
-        run: |
-           mv images/${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2 .
-           tar -cvf ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2
-           split -b 1024M ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}.qcow2.tar.part_
-
-      - name: Upload *.qcow2.tar.part_* files to GitHub Releases as an Asset
-        # Four parts at a time: one upload at a time took ~4 min. xargs fails the step if any upload fails.
-        env:
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.glueops_codespace_tag || github.event.workflow_run.head_branch }}
         run: |
+          aws s3 cp "images/$TAG.qcow2" "s3://$S3_BUCKET/$TAG.qcow2" --acl public-read --no-progress &
+          s3=$!
+          tar -C images -cvf "$TAG.qcow2.tar" "$TAG.qcow2"
+          split -b 1024M "$TAG.qcow2.tar" "$TAG.qcow2.tar.part_"
           printf '%s\0' ./*.qcow2.tar.part_* | xargs -0 -P 4 -I{} gh release upload "$TAG" {} --clobber --repo "$GITHUB_REPOSITORY"
+          wait "$s3"
