@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.164.0](https://github.com/GlueOps/codespaces/compare/v0.163.0...v0.164.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* self-healing codespace VM ([#621](https://github.com/GlueOps/codespaces/issues/621))
+
+### Features
+
+* self-healing codespace VM ([#621](https://github.com/GlueOps/codespaces/issues/621)) ([f97537e](https://github.com/GlueOps/codespaces/commit/f97537e6739301637f377a57ae66fe701eca790d))
+
+
+### Bug Fixes
+
+* keep libvirt and Proxmox codespaces from re-initialising on every restart ([#622](https://github.com/GlueOps/codespaces/issues/622)) ([ed2f321](https://github.com/GlueOps/codespaces/commit/ed2f3211cd8174af6e50e55f048196d05e0d48cb))
+
 ## [0.163.0](https://github.com/GlueOps/codespaces/compare/v0.162.0...v0.163.0) (2026-11-02)
 
 
