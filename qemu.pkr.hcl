@@ -18,6 +18,9 @@ source "qemu" "qemu-amd64" {
   ssh_username      = "debian"
   ssh_password      = "${var.image_password}"
   shutdown_command  = "sudo fstrim -av && sudo shutdown -P now"
+  # Plugin default discard=ignore drops the fstrim, leaving deleted files' blocks in the image.
+  disk_discard       = "unmap"
+  disk_detect_zeroes = "unmap"
   # The post-processor's zstd qemu-img convert already compacts the image.
   skip_compaction   = true
   headless          = true
