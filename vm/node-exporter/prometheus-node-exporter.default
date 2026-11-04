@@ -1,0 +1,6 @@
+# Installed to /etc/default/prometheus-node-exporter by vm/observability.sh (read by Debian's unit as $ARGS).
+#
+# Loopback only: these VMs carry a public cloud address and a Tailscale one, and the only consumer is the
+# collector on the same host. (The codespace container runs with --net=host, so it can still reach it.)
+# The textfile directory is where a later change can drop platform gauges — e.g. which image tag the container is on.
+ARGS="--web.listen-address=127.0.0.1:9100 --collector.textfile.directory=/var/lib/prometheus/node-exporter"

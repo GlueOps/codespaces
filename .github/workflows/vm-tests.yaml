@@ -1,0 +1,30 @@
+name: vm tests
+on:
+  pull_request:
+    paths:
+      - 'vm/**'
+      - 'qemu.pkr.hcl'
+      - 'hack/test-vm.sh'
+      - '.github/workflows/vm-tests.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The Packer image build only runs from main after a release, so a broken collector config would otherwise be
+# found an hour into a build. This validates the config with the exact collector version the image pins.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install shellcheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+      - name: Download the pinned otelcol-contrib
+        run: |
+          v=$(sed -n 's/^VERSION_OTELCOL_CONTRIB=//p' vm/observability.sh)
+          curl -fsSLo otelcol.tgz "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${v}/otelcol-contrib_${v}_linux_amd64.tar.gz"
+          tar -xzf otelcol.tgz otelcol-contrib && ./otelcol-contrib --version
+      - name: hack/test-vm.sh
+        run: OTELCOL_BIN=./otelcol-contrib ./hack/test-vm.sh
