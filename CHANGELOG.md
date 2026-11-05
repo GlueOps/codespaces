@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.164.1](https://github.com/GlueOps/codespaces/compare/v0.164.0...v0.164.1) (2026-11-05)
+
+
+### Dependencies
+
+* update docker/login-action digest to 8aa5831 ([#626](https://github.com/GlueOps/codespaces/issues/626)) ([7203e9f](https://github.com/GlueOps/codespaces/commit/7203e9f7f47f89843c05ba69a7d843a19ea40845))
+
 ## [0.164.0](https://github.com/GlueOps/codespaces/compare/v0.163.0...v0.164.0) (2026-11-03)
 
 
