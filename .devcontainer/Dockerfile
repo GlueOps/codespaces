@@ -42,7 +42,7 @@ ARG VERSION_CLAUDE_CODE=2.1.316
 ARG VERSION_CLOUDFLARED=2026.9.3
 # One version for the code package, the CLI and the serve-web server baked below (it uses the CLI's commit).
 # renovate: datasource=github-tags depName=microsoft/vscode
-ARG VERSION_VSCODE=1.144.1
+ARG VERSION_VSCODE=1.145.2
 
 # https://developer.hashicorp.com/vault/docs/commands#vault_skip_verify
 # https://github.com/GlueOps/terraform-module-kubernetes-hashicorp-vault-configuration/wiki
