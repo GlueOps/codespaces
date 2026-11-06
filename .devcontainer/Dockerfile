@@ -39,7 +39,7 @@ ARG VERSION_KREW=0.5.0
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG VERSION_CLAUDE_CODE=2.1.316
 # renovate: datasource=github-tags depName=cloudflare/cloudflared
-ARG VERSION_CLOUDFLARED=2026.9.3
+ARG VERSION_CLOUDFLARED=2026.10.0
 # One version for the code package, the CLI and the serve-web server baked below (it uses the CLI's commit).
 # renovate: datasource=github-tags depName=microsoft/vscode
 ARG VERSION_VSCODE=1.144.1
