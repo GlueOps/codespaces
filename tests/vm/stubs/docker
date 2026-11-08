@@ -7,6 +7,8 @@ case "$1" in
     info) [ -e "$S/docker_down" ] && { echo "Cannot connect to the Docker daemon" >&2; exit 1; }; exit 0 ;;
     container)
         [ "$2" = inspect ] || exit 0
+        # The real CLI prints an empty line to stdout when the daemon is down.
+        [ -e "$S/docker_down" ] && { echo; echo "Cannot connect to the Docker daemon" >&2; exit 1; }
         fmt="$4"
         [ "$(get container missing)" = missing ] && { echo "Error response from daemon: No such container: $5" >&2; exit 1; }
         st=$(get container)
@@ -34,6 +36,13 @@ case "$1" in
     exec)
         case "$*" in
             *"tunnel status"*) get tunnel_status '{"tunnel":null}' ;;
+            # The codespace shell's docker exec; it can stop the container, like one dying under the shell.
+            *" -it "*)
+                # _later: the container still reads as running for a moment after the exec dies, like a killed one.
+                [ -e "$S/exec_stops_container_later" ] && { (sleep 1; echo exited > "$S/container") > /dev/null 2>&1 & }
+                [ -e "$S/exec_stops_container" ] && echo exited > "$S/container"
+                exit "$(get exec_rc 0)" ;;
+            *"CODESPACE_SHELL_ID="*) exit 0 ;;
             *) echo "CDE-BOOT-OUTPUT may echo secrets" ;;
         esac
         ;;

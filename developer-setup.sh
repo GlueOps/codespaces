@@ -73,7 +73,7 @@ echo "✅ 'gum' installed successfully to /usr/bin/gum"
 echo "   Verify with: gum --version"
 gum --version
 
-### Install ttyd: the VM terminal (codespace-ttyd). Not packaged in Debian 13; pinned by hand.
+### Install ttyd: the browser shells (codespace-ttyd). Not packaged in Debian 13; pinned by hand.
 TTYD_URL=https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
 TTYD_SHA256=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
 # -p /tmp: the gum block above points TMPDIR at a directory it has since deleted.
@@ -96,7 +96,7 @@ CODESPACE_NAME=codespace
 CODESPACE_IMAGE_REPO=ghcr.repo.gpkg.io/glueops/codespaces
 CODESPACE_TAG_FILE=/etc/glueops/codespace-tag
 CODESPACE_CDE_TOKEN_FILE=/etc/glueops/cde_token
-CODESPACE_TERMINAL_TOKEN_FILE=/etc/glueops/terminal_token
+CODESPACE_SHELL_TOKEN_FILE=/etc/glueops/shell_token
 CODESPACE_ENV_FILE=/etc/glueops/codespace.env
 CODESPACE_ENDPOINT_FILE=/etc/glueops/tunnel_endpoint
 
@@ -106,24 +106,36 @@ codespace_tunnel_endpoint() {
     head -n1 "$CODESPACE_ENDPOINT_FILE" | tr -d '[:space:]'
 }
 
-# The sish name each tunnel binds: the editor its bare hostname, the VM terminal term-<hostname>.
-# The Slack bot derives the access URLs from the same rule (util/libvirt/libvirt-server.js).
-codespace_tunnel_bind() {
+# What the VM serves through sish, by id (README "Browser shells"): the editor, the codespace shell (inside
+# the container) and the VM shell. Each has a codespace-tunnel@<id>; the shells also a codespace-ttyd@<id>.
+CODESPACE_ACCESS="editor shell vm"
+
+# The sish name each id binds: the editor its bare hostname, the shells <id>-<hostname>. The Slack bot
+# derives the access URLs from the same rule (util/libvirt/libvirt-server.js).
+codespace_bind() {
     case "$1" in
         editor) hostname ;;
-        terminal) echo "term-$(hostname)" ;;
+        shell | vm) echo "$1-$(hostname)" ;;
     esac
 }
 
-codespace_tunnel_url() {
-    echo "https://$(codespace_tunnel_bind "$1").$(codespace_tunnel_endpoint)"
+codespace_url() {
+    echo "https://$(codespace_bind "$1").$(codespace_tunnel_endpoint)"
 }
 
-# The file whose token turns each tunnel on.
-codespace_tunnel_token_file() {
+codespace_port() {
+    case "$1" in
+        editor) echo 8000 ;;
+        vm) echo 7681 ;;
+        shell) echo 7682 ;;
+    esac
+}
+
+# The file whose token turns each id on; both shells share one password.
+codespace_token_file() {
     case "$1" in
         editor) echo "$CODESPACE_CDE_TOKEN_FILE" ;;
-        terminal) echo "$CODESPACE_TERMINAL_TOKEN_FILE" ;;
+        shell | vm) echo "$CODESPACE_SHELL_TOKEN_FILE" ;;
     esac
 }
 CODESPACE_COMMON_EOF
@@ -142,10 +154,10 @@ set -euo pipefail
 exec 9> /run/lock/codespace-ensure.lock
 flock 9
 
-# The tunnels don't need Docker: the VM terminal must come up when the container is broken. Every
-# run, so a token that arrives late is picked up within a minute; a disabled tunnel stays off.
-for t in editor terminal; do
-    if [ -s "$(codespace_tunnel_token_file "$t")" ] && systemctl is-enabled --quiet "codespace-tunnel@$t.service"; then
+# The tunnels don't need Docker: the VM shell must come up when the container is broken. Every run,
+# so a token that arrives late is picked up within a minute; a disabled tunnel stays off.
+for t in $CODESPACE_ACCESS; do
+    if [ -s "$(codespace_token_file "$t")" ] && systemctl is-enabled --quiet "codespace-tunnel@$t.service"; then
         systemctl start --no-block "codespace-tunnel@$t.service" || echo "couldn't start codespace-tunnel@$t" >&2
     fi
 done
@@ -225,22 +237,22 @@ CODESPACE_ENSURE_EOF
 
 sudo tee /usr/local/bin/codespace-tunnel > /dev/null <<'CODESPACE_TUNNEL_EOF'
 #!/usr/bin/env bash
-# codespace-tunnel editor|terminal: one sish reverse tunnel, for the browser editor (127.0.0.1:8000) or the
-# VM terminal (127.0.0.1:7681). Run as vscode by codespace-tunnel@<name>, which restarts it whenever ssh
-# exits. --check <name> is that unit's ExecCondition: the unit is skipped while the token or endpoint is missing.
+# codespace-tunnel editor|shell|vm: one sish reverse tunnel, from <id>'s URL to its port on 127.0.0.1 (common.sh).
+# Run as vscode by codespace-tunnel@<id>, which restarts it whenever ssh exits. --check <id> is that unit's
+# ExecCondition: the unit is skipped while the token or endpoint is missing.
 set -euo pipefail
 # shellcheck source=/dev/null
 . /usr/local/lib/codespace/common.sh
 
 if [ "${1:-}" = --check ]; then
-    [ -s "$(codespace_tunnel_token_file "${2:-}")" ] && [ -n "$(codespace_tunnel_endpoint)" ]
+    [ -s "$(codespace_token_file "${2:-}")" ] && [ -n "$(codespace_tunnel_endpoint)" ]
     exit
 fi
-case "${1:-}" in
-    editor) port=8000 ;;
-    terminal) port=7681 ;;
-    *) echo "usage: codespace-tunnel editor|terminal" >&2; exit 2 ;;
-esac
+port="$(codespace_port "${1:-}")"
+if [ -z "$port" ]; then
+    echo "usage: codespace-tunnel editor|shell|vm" >&2
+    exit 2
+fi
 
 key="$HOME/.ssh/sish_tunnel_key_id_ed25519"
 # Both tunnels start together at first boot, and sish pins the first key it sees for this VM's
@@ -266,22 +278,95 @@ exec ssh -N -T \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
     -o IdentitiesOnly=yes -i "$key" \
-    -p 2222 -l "$host" -R "$(codespace_tunnel_bind "$1"):80:localhost:$port" "$endpoint"
+    -p 2222 -l "$host" -R "$(codespace_bind "$1"):80:localhost:$port" "$endpoint"
 CODESPACE_TUNNEL_EOF
 
 sudo tee /usr/local/bin/codespace-ttyd > /dev/null <<'CODESPACE_TTYD_EOF'
 #!/usr/bin/env bash
-# codespace-ttyd: the VM terminal, a login shell on the VM served by ttyd on 127.0.0.1:7681 and reached
-# through codespace-tunnel@terminal at https://term-<hostname>.<endpoint>. Sign-in: user vscode, password
-# /etc/glueops/terminal_token. Run as vscode by codespace-ttyd.service, alongside that tunnel.
+# codespace-ttyd shell|vm: a browser shell, served by ttyd on 127.0.0.1 and reached through codespace-tunnel@<id>:
+# shell is a login shell inside the codespace container, vm one on the VM itself. Sign-in: user vscode, password
+# /etc/glueops/shell_token. Run as vscode by codespace-ttyd@<id>.
+# codespace-ttyd --connect is the codespace shell's command for each browser connection.
 set -euo pipefail
 # shellcheck source=/dev/null
 . /usr/local/lib/codespace/common.sh
 
-token="$(cat "$CODESPACE_TERMINAL_TOKEN_FILE" 2> /dev/null || true)"
+container_state() {
+    local out
+    if out="$(timeout 10 docker container inspect -f '{{.State.Status}} {{.State.StartedAt}}' "$CODESPACE_NAME" 2> /dev/null)"; then
+        echo "$out"
+    elif timeout 10 docker info > /dev/null 2>&1; then
+        echo missing
+    else
+        echo docker-down
+    fi
+}
+
+# A docker exec whose client goes away leaves its shell running in the container, so this connection's
+# sessions there are hung up, as a real hangup would: each shell its docker execs started (tagged with
+# CODESPACE_SHELL_ID, its parent outside the container) and everything in their sessions. tmux, screen and
+# setsid'd jobs have sessions of their own and keep running. As root, to reach a sudo'd shell too.
+cleanup() {
+    timeout 10 docker exec -u 0 "$CODESPACE_NAME" sh -c '
+        sids=
+        for p in /proc/[0-9]*; do
+            grep -qxzF "CODESPACE_SHELL_ID=$1" "$p/environ" 2> /dev/null || continue
+            set -- "$1" $(sed "s/^.*) //" "$p/stat" 2> /dev/null)   # state ppid pgrp session ...
+            [ "${3:-}" = 0 ] && sids="$sids $5 "
+        done
+        [ -n "$sids" ] || exit 0
+        for p in /proc/[0-9]*; do
+            s=$(sed "s/^.*) //" "$p/stat" 2> /dev/null | cut -d" " -f4)
+            case "$sids" in *" $s "*) [ -n "$s" ] && kill -HUP "${p#/proc/}" ;; esac
+        done; true' sh "$id" < /dev/null > /dev/null 2>&1 || true
+}
+
+connect() {
+    id="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+    trap cleanup EXIT
+    trap 'exit 129' HUP TERM
+    local state rc
+    while :; do
+        state="$(container_state)"
+        if [ "${state%% *}" = running ]; then
+            # No -u or -w: the shell gets the container's user (with its docker group), directory and
+            # environment, like the editor's terminal. The detach keys are moved off Ctrl-P, which shells use.
+            rc=0
+            docker exec -it -e TERM -e COLORTERM -e LANG -e "CODESPACE_SHELL_ID=$id" --detach-keys=ctrl-^,ctrl-^ \
+                "$CODESPACE_NAME" sh -c 'exec "$(getent passwd "$(id -u)" | cut -d: -f7)" -l' || rc=$?
+            # A normal exit ends the page; a container that stopped under the shell brings back the waiting
+            # screen. A container being killed can still read as running for a moment, so wait before checking
+            # after a failed exec. Before waiting, hang up what the exec left (a live-restored dockerd restart).
+            [ "$rc" = 0 ] || sleep 2
+            [ "$(container_state)" = "$state" ] && exit "$rc"
+            cleanup
+            continue
+        fi
+        case "${state%% *}" in
+            missing) echo "The codespace container is being created (by codespace-ensure, or dev reset)." ;;
+            restarting) echo "The codespace container is restarting." ;;
+            removing) echo "The codespace container is being removed; codespace-ensure creates it again within a minute." ;;
+            docker-down) echo "Docker isn't answering on the VM." ;;
+            *) echo "The codespace container is ${state%% *}; codespace-ensure starts it within a minute." ;;
+        esac
+        echo "This page connects when it's up (Enter checks now). To see why: open the VM shell at"
+        echo "$(codespace_url vm) and run: dev status"
+        echo
+        # read times out (> 128) to check again; anything else is Enter, or the page closing.
+        read -r -t 5 _ || [ $? -gt 128 ] || exit 0
+    done
+}
+
+case "${1:-}" in
+    --connect) connect ;;
+    shell) title="Codespace shell - $(hostname)" cmd=(/usr/local/bin/codespace-ttyd --connect) ;;
+    vm) title="VM shell - $(hostname)" cmd=(bash -l) ;;
+    *) echo "usage: codespace-ttyd shell|vm" >&2; exit 2 ;;
+esac
+token="$(cat "$CODESPACE_SHELL_TOKEN_FILE" 2> /dev/null || true)"
 # ttyd keeps the credential in 256-byte buffers and fails every login, silently, past about 180.
 if ! [[ "$token" =~ ^[A-Za-z0-9]{32,128}$ ]]; then
-    echo "codespace-ttyd: $CODESPACE_TERMINAL_TOKEN_FILE is missing or isn't 32-128 letters and digits" >&2
+    echo "codespace-ttyd: $CODESPACE_SHELL_TOKEN_FILE is missing or isn't 32-128 letters and digits" >&2
     exit 1
 fi
 # ttyd has no credential-file option, so the token is on its command line, and journald stores the
@@ -289,7 +374,7 @@ fi
 # credential at notice level. -O: refuse websockets opened from other origins (every tunnel shares the
 # SSO cookie's domain). -P 2: sish drops a connection idle for 5s (--idle-connection-timeout), and
 # ttyd's default first ping comes only after 5s, so an idle page kept reconnecting to a new shell.
-exec ttyd -i lo -p 7681 -W -O -d 3 -P 2 -t "titleFixed=VM $(hostname)" -c "vscode:$token" bash -l > /dev/null 2>&1
+exec ttyd -i lo -p "$(codespace_port "$1")" -W -O -d 3 -P 2 -t "titleFixed=$title" -c "vscode:$token" "${cmd[@]}" > /dev/null 2>&1
 CODESPACE_TTYD_EOF
 
 sudo tee /usr/local/bin/dev > /dev/null <<'CODESPACE_DEV_EOF'
@@ -321,42 +406,50 @@ codespace_mode() {
     esac
 }
 
-# The VM terminal's line. It doesn't need the container, and it's information only: it never makes the
-# codespace unhealthy.
-terminal_status() {
-    if [ ! -s "$CODESPACE_TERMINAL_TOKEN_FILE" ]; then
-        echo "  terminal   off: $CODESPACE_TERMINAL_TOKEN_FILE is missing or empty"
+row() { printf '  %-15s  %s\n' "$1" "$2"; }
+
+# A browser shell's line. The shells don't need the container, and they're information only: they never
+# make the codespace unhealthy.
+shell_status() { # <id> <label>
+    local unit="codespace-tunnel@$1"
+    if [ ! -s "$CODESPACE_SHELL_TOKEN_FILE" ]; then
+        row "$2" "off: $CODESPACE_SHELL_TOKEN_FILE is missing or empty"
     elif [ -z "$(codespace_tunnel_endpoint)" ]; then
-        echo "  terminal   off: $CODESPACE_ENDPOINT_FILE is missing or empty"
-    elif ! systemctl is-enabled --quiet codespace-tunnel@terminal.service; then
-        echo "  terminal   off: disabled (sudo systemctl enable --now codespace-tunnel@terminal)"
-    elif ! systemctl is-active --quiet codespace-tunnel@terminal.service; then
-        echo "  terminal   tunnel $(systemctl is-active codespace-tunnel@terminal.service || true)  restarts=$(systemctl show -p NRestarts --value codespace-tunnel@terminal.service)  (sudo journalctl -u codespace-tunnel@terminal -n 20)"
-    elif ! systemctl is-active --quiet codespace-ttyd.service; then
-        echo "  terminal   ttyd $(systemctl is-active codespace-ttyd.service || true)  (sudo journalctl -u codespace-ttyd -n 20)"
+        row "$2" "off: $CODESPACE_ENDPOINT_FILE is missing or empty"
+    elif ! systemctl is-enabled --quiet "$unit.service"; then
+        row "$2" "off: disabled (sudo systemctl enable --now $unit)"
+    elif ! systemctl is-active --quiet "$unit.service"; then
+        row "$2" "tunnel $(systemctl is-active "$unit.service" || true)  restarts=$(systemctl show -p NRestarts --value "$unit.service")  (sudo journalctl -u $unit -n 20)"
+    elif ! systemctl is-active --quiet "codespace-ttyd@$1.service"; then
+        row "$2" "ttyd $(systemctl is-active "codespace-ttyd@$1.service" || true)  (sudo journalctl -u codespace-ttyd@$1 -n 20)"
     else
-        echo "  terminal   up  $(codespace_tunnel_url terminal)  (user vscode, password: the VM terminal password in your Slack message)"
+        row "$2" "up  $(codespace_url "$1")  (user vscode, password: the shell password in your Slack message)"
     fi
+}
+
+shells_status() {
+    shell_status shell "codespace shell"
+    shell_status vm "vm shell"
 }
 
 # Prints one line per part and returns 0 only if the codespace is usable.
 status() {
     local healthy=0 info state running started restarts oom code err image
     if ! info="$(docker container inspect -f '{{.State.Status}}|{{.State.Running}}|{{.State.StartedAt}}|{{.RestartCount}}|{{.State.OOMKilled}}|{{.State.ExitCode}}|{{.Config.Image}}|{{.State.Error}}' "$CODESPACE_NAME" 2> /dev/null)"; then
-        echo "  container  missing - codespace-ensure creates it within a minute"
-        echo "             (progress: sudo journalctl -u codespace-ensure -n 20)"
-        terminal_status
+        row container "missing - codespace-ensure creates it within a minute"
+        row "" "(progress: sudo journalctl -u codespace-ensure -n 20)"
+        shells_status
         return 1
     fi
     IFS='|' read -r state running started restarts oom code image err <<< "$info"
-    local line="  container  $state  ${image##*:}  restarts=$restarts"
+    local line="$state  ${image##*:}  restarts=$restarts"
     [ "$restarts" != 0 ] && line+="  last exit=$code"
     [ "$oom" = true ] && line+=" (OOM-killed)"
-    echo "$line"
-    [ -n "$err" ] && echo "             error: $err"
+    row container "$line"
+    [ -n "$err" ] && row "" "error: $err"
     if [ "$running" != true ] || [ "$state" = restarting ]; then
         healthy=1
-        echo "             why: docker logs codespace    if it stays down: dev reset (deletes the container and its volumes)"
+        row "" "why: docker logs codespace    if it stays down: dev reset (deletes the container and its volumes)"
     fi
 
     case "$(codespace_mode)" in
@@ -364,22 +457,22 @@ status() {
             local http
             http="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:8000/ || true)"
             if [ "$http" != 000 ] && [ -n "$http" ]; then
-                echo "  editor     up (127.0.0.1:8000)"
+                row editor "up (127.0.0.1:8000)"
             else
-                echo "  editor     not answering on 127.0.0.1:8000  (docker logs codespace)"
+                row editor "not answering on 127.0.0.1:8000  (docker logs codespace)"
                 healthy=1
             fi
             if [ -z "$(codespace_tunnel_endpoint)" ]; then
-                echo "  sish       no endpoint: $CODESPACE_ENDPOINT_FILE is missing or empty"
+                row sish "no endpoint: $CODESPACE_ENDPOINT_FILE is missing or empty"
                 healthy=1
             else
                 if systemctl is-active --quiet codespace-tunnel@editor.service; then
-                    echo "  sish       up  restarts=$(systemctl show -p NRestarts --value codespace-tunnel@editor.service)"
+                    row sish "up  restarts=$(systemctl show -p NRestarts --value codespace-tunnel@editor.service)"
                 else
-                    echo "  sish       $(systemctl is-active codespace-tunnel@editor.service || true)  restarts=$(systemctl show -p NRestarts --value codespace-tunnel@editor.service)  (sudo journalctl -u codespace-tunnel@editor -n 20)"
+                    row sish "$(systemctl is-active codespace-tunnel@editor.service || true)  restarts=$(systemctl show -p NRestarts --value codespace-tunnel@editor.service)  (sudo journalctl -u codespace-tunnel@editor -n 20)"
                     healthy=1
                 fi
-                echo "  url        $(codespace_tunnel_url editor)  (use your Slack link: it carries your token)"
+                row url "$(codespace_url editor)  (use your Slack link: it carries your token)"
             fi
             ;;
         tunnel)
@@ -388,22 +481,22 @@ status() {
             tstate="$(jq -r '.tunnel.tunnel // empty' <<< "$js" 2> /dev/null || true)"
             tname="$(jq -r '.tunnel.name // empty' <<< "$js" 2> /dev/null || true)"
             if [ "$tstate" = Connected ]; then
-                echo "  editor     connected  https://vscode.dev/tunnel/$tname/workspaces/glueops"
+                row editor "connected  https://vscode.dev/tunnel/$tname/workspaces/glueops"
             else
                 healthy=1
                 # It prints a fresh code on its own about every 15 minutes; only the latest one works.
                 devcode="$(docker logs --since "$started" "$CODESPACE_NAME" 2>&1 | grep -o 'login/device and use code [A-Z0-9-]*' | tail -n1 | awk '{print $NF}' || true)"
                 if [ -n "$devcode" ] && [ -z "$tname" ]; then
-                    echo "  editor     waiting for login: open https://github.com/login/device and enter $devcode"
+                    row editor "waiting for login: open https://github.com/login/device and enter $devcode"
                 else
-                    echo "  editor     ${tstate:-starting}  (dev logs)"
+                    row editor "${tstate:-starting}  (dev logs)"
                 fi
             fi
-            [ -s "$CODESPACE_CDE_TOKEN_FILE" ] && echo "  note       a connection token exists but the codespace is in tunnel mode: dev reset"
+            [ -s "$CODESPACE_CDE_TOKEN_FILE" ] && row note "a connection token exists but the editor is a VS Code tunnel: dev reset"
             ;;
     esac
-    terminal_status
-    echo "  disk       $(df -h --output=avail / | tail -n1 | tr -d ' ') free on /"
+    shells_status
+    row disk "$(df -h --output=avail / | tail -n1 | tr -d ' ') free on /"
     return "$healthy"
 }
 
@@ -442,7 +535,7 @@ update_notice() {
     current="$(docker container inspect -f '{{.Config.Image}}' "$CODESPACE_NAME" 2> /dev/null || true)"
     current="${current##*:}"
     if [ -n "$latest" ] && [ -n "$current" ] && [ "$latest" != "$current" ]; then
-        echo "  update     $latest is available (you have $current). Commit and push your work, then create a new codespace in Slack."
+        row update "$latest is available (you have $current). Commit and push your work, then create a new codespace in Slack."
     fi
 }
 
@@ -459,7 +552,7 @@ logs() {
     while :; do
         case "$(codespace_mode)" in
             web)
-                sudo journalctl -f -n 30 -u 'codespace-tunnel@*' -u codespace-ttyd.service -u codespace-ensure.service || true
+                sudo journalctl -f -n 30 -u 'codespace-tunnel@*' -u 'codespace-ttyd@*' -u codespace-ensure.service || true
                 [ -n "${DEV_LOGS_WINDOW:-}" ] || exit 130
                 ;;
             tunnel)
@@ -602,7 +695,7 @@ Restart=always
 # Flat on purpose: RestartSteps never resets after a healthy run, so a stepped backoff ends up at
 # its maximum for every later drop.
 RestartSec=5s
-# A reconnect doesn't pass through inactive, so it doesn't stop codespace-ttyd (BindsTo).
+# A reconnect doesn't pass through inactive, so it doesn't stop its codespace-ttyd (BindsTo).
 RestartMode=direct
 # A few MB of ssh carries everyone's access; let the kernel pick something else under memory pressure.
 OOMScoreAdjust=-500
@@ -611,28 +704,29 @@ OOMScoreAdjust=-500
 WantedBy=cloud-init.target
 CODESPACE_TUNNEL_UNIT_EOF
 
-sudo tee /etc/systemd/system/codespace-ttyd.service > /dev/null <<'CODESPACE_TTYD_UNIT_EOF'
+sudo tee /etc/systemd/system/codespace-ttyd@.service > /dev/null <<'CODESPACE_TTYD_UNIT_EOF'
 [Unit]
-Description=VM terminal: a shell on the VM (not the container), served by ttyd through the sish tunnel
-BindsTo=codespace-tunnel@terminal.service
-After=codespace-tunnel@terminal.service
+Description=Browser shell %i (codespace-ttyd %i), served through codespace-tunnel@%i
+BindsTo=codespace-tunnel@%i.service
+After=codespace-tunnel@%i.service
 
 [Service]
 User=vscode
 WorkingDirectory=~
 Environment=LANG=C.UTF-8
-ExecStart=/usr/local/bin/codespace-ttyd
-# Stop only ttyd: a tmux server started in the browser also holds every other tmux session of vscode.
+ExecStart=/usr/local/bin/codespace-ttyd %i
+# Stop only ttyd: a tmux server started in the VM shell also holds every other tmux session of vscode.
 # Each browser shell still ends when its page disconnects.
 KillMode=process
-# The browser shells run in this unit: when one of them runs the VM out of memory, the kernel kills that
-# process and the rest carry on. The default (stop) would also cut every other open terminal.
+# The VM shells run in this unit: when one of them runs the VM out of memory, the kernel kills that
+# process and the rest carry on. The default (stop) would also cut every other open shell.
 OOMPolicy=continue
 Restart=always
 RestartSec=5s
 
 [Install]
-WantedBy=codespace-tunnel@terminal.service
+# Enable the instances (codespace-ttyd@shell, @vm), not the bare template.
+WantedBy=codespace-tunnel@%i.service
 CODESPACE_TTYD_UNIT_EOF
 
 # Docker starts the container itself at boot; give tailscaled the chance to create its socket first.
@@ -643,7 +737,8 @@ printf '[Service]\nRuntimeDirectoryPreserve=yes\n' | sudo tee /etc/systemd/syste
 
 sudo systemctl daemon-reload
 # Enabled, not started: at image build there is no token or tag yet; the first boot starts them.
-sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@terminal.service codespace-ttyd.service
+sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@shell.service \
+    codespace-tunnel@vm.service codespace-ttyd@shell.service codespace-ttyd@vm.service
 
 # Fetch latest release if GLUEOPS_CODESPACES_CONTAINER_TAG is not set
 if [ -z "$GLUEOPS_CODESPACES_CONTAINER_TAG" ]; then

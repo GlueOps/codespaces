@@ -31,7 +31,7 @@ files=(
     CODESPACE_ENSURE_UNIT_EOF:/etc/systemd/system/codespace-ensure.service
     CODESPACE_ENSURE_TIMER_EOF:/etc/systemd/system/codespace-ensure.timer
     CODESPACE_TUNNEL_UNIT_EOF:/etc/systemd/system/codespace-tunnel@.service
-    CODESPACE_TTYD_UNIT_EOF:/etc/systemd/system/codespace-ttyd.service
+    CODESPACE_TTYD_UNIT_EOF:/etc/systemd/system/codespace-ttyd@.service
 )
 echo "== extract embedded files"
 mkdir -p /usr/local/lib/codespace
@@ -59,7 +59,9 @@ echo "== systemd-analyze verify"
 # it does. Link it in by hand or the units hung off it are never checked. verify exits 0 even when
 # it finds a cycle, so the output is what's checked.
 ln -sf /lib/systemd/system/cloud-init.target /etc/systemd/system/multi-user.target.wants/cloud-init.target
-systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@terminal.service codespace-ttyd.service 2> /dev/null
+# developer-setup.sh's own enable command (it spans lines), without sudo.
+enable_cmd=$(sed -n '/^sudo systemctl enable codespace-ensure/,/[^\\]$/p' developer-setup.sh)
+bash -c "${enable_cmd#sudo }" 2> /dev/null
 verify() { systemd-analyze verify --man=no default.target 2>&1 || true; }
 out="$(verify)"
 if grep -qi 'ordering cycle' <<< "$out"; then
@@ -83,9 +85,16 @@ if grep -qF -- "--entrypoint true $vols" developer-setup.sh && grep -qF -- "$vol
 else echo "  FAIL: the build-time volume fill and codespace-ensure use different volumes" >&2; exit 1; fi
 
 echo "== units enabled at setup"
-if grep -qx 'sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@terminal.service codespace-ttyd.service' developer-setup.sh; then
-    echo "  ok   developer-setup.sh enables every unit"
-else echo "  FAIL: developer-setup.sh doesn't enable every unit" >&2; exit 1; fi
+for u in codespace-tunnel@editor codespace-tunnel@shell codespace-tunnel@vm codespace-ensure; do
+    [ -e "/etc/systemd/system/cloud-init.target.wants/$u.service" ] || { echo "  FAIL: $u isn't wanted by cloud-init.target" >&2; exit 1; }
+done
+[ -e /etc/systemd/system/timers.target.wants/codespace-ensure.timer ] || { echo "  FAIL: codespace-ensure.timer isn't enabled" >&2; exit 1; }
+echo "  ok   every tunnel and codespace-ensure enabled"
+# Only the two shells get a ttyd: enabling the bare template would hang one off every tunnel.
+wants=(/etc/systemd/system/codespace-tunnel@*.service.wants/codespace-ttyd@*)
+if [ "${#wants[@]}" = 2 ] && [ -e /etc/systemd/system/codespace-tunnel@shell.service.wants/codespace-ttyd@shell.service ] \
+    && [ -e /etc/systemd/system/codespace-tunnel@vm.service.wants/codespace-ttyd@vm.service ]; then echo "  ok   ttyd wanted by the shell and vm tunnels only"; else
+    echo "  FAIL: ttyd wants: ${wants[*]}" >&2; exit 1; fi
 
 echo "== behaviour"
 install -m 755 tests/vm/stubs/* /usr/local/bin/
