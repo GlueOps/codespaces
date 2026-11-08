@@ -5,6 +5,8 @@ case "$*" in
     "is-active --quiet codespace-tunnel.service") [ -e "$S/tunnel_active" ] ;;
     "is-active codespace-tunnel.service") if [ -e "$S/tunnel_active" ]; then echo active; else echo activating; exit 3; fi ;;
     "show -p NRestarts --value codespace-tunnel.service") echo 0 ;;
+    "is-active --quiet codespace-terminal.service") [ -e "$S/terminal_active" ] ;;
+    "is-active codespace-terminal.service") if [ -e "$S/terminal_active" ]; then echo active; else echo activating; exit 3; fi ;;
     "show -p ActiveState --value codespace-ensure.service") [ -e "$S/ensure_running" ] && echo activating || echo inactive ;;
     "show -p InactiveExitTimestamp --value codespace-ensure.service") echo "Tue 2026-11-03 02:07:45 UTC" ;;
     # Stands in for someone giving up on a long create: kill dev reset mid-run.

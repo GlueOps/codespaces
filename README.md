@@ -31,6 +31,7 @@ a crash or an out-of-memory kill.
 - **`codespace-tunnel.service`** runs the sish reverse tunnel for the browser editor and reconnects whenever it drops.
   It connects to the regional endpoint that cloud-init writes to `/etc/glueops/tunnel_endpoint`; without that file
   there is no tunnel, and `dev status` says so.
+- **`codespace-terminal.service`** serves the browser terminal (below) on `127.0.0.1:7681`.
 - Home (`/home/vscode`) and `/nix` are named volumes (`codespace-home`, `codespace-nix`), so a recreated container
   keeps your dotfiles, logins and devbox packages. The image build fills them, so a new codespace starts quickly;
   after `dev reset` the first start copies them again and takes a few minutes. `/workspaces/glueops` is on the VM's
@@ -52,6 +53,21 @@ dev reset    delete the container AND its home and /nix volumes, then create it 
 `docker logs codespace`). After that first login the tunnel reconnects by itself. Low-level logs:
 `sudo journalctl -u codespace-ensure -u codespace-tunnel`. The secrets in `/etc/glueops/codespace.env` are passed to
 the container as environment variables, so they show in `docker inspect`, as before.
+
+### Browser terminal
+
+A shell on the VM itself (not in the codespace container) at `https://term-<hostname>.<endpoint>`, next to the editor's
+URL; `dev status` prints it. Sign in with Google, then at the browser's login prompt use user `cde` and the token from
+your Slack link (the `tkn=` value) as the password. It's a plain login shell as `vscode` (with sudo): the container is
+`docker exec -it codespace bash -l`.
+
+- The shell ends when the page disconnects (closing the tab, a tunnel reconnect, the 12-hour Google sign-in expiring).
+  Run `tmux` (or `dev`) for anything that should keep running; reattach from the browser or over SSH. If the page keeps
+  saying it's reconnecting, reload it to sign in again.
+- It runs only when the editor's tunnel does, so it doesn't help when the tunnel itself is down. Use SSH over Tailscale
+  for that.
+- `codespace-ensure` starts it again within a minute after a `systemctl stop`; to turn it off, run
+  `sudo systemctl disable --now codespace-terminal`.
 
 ## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`
 

@@ -10,6 +10,8 @@ fails=0
 all_output=""
 
 reset_state() {
+    # Keep every case's calls for the final token check.
+    [ -f "$STATE/calls" ] && all_output+="$(cat "$STATE/calls")"$'\n'
     rm -rf "$STATE"
     mkdir -p "$STATE"
     chmod 777 "$STATE"
@@ -96,7 +98,7 @@ echo "== codespace-tunnel"
 reset_state
 rm -rf /home/vscode/.ssh
 run su vscode -c codespace-tunnel
-expect_call "binds the hostname on the endpoint" "-l testvm -R testvm:80:localhost:8000 regional.example.com"
+expect_call "binds the hostname on the endpoint, the terminal next to it" "-l testvm -R testvm:80:localhost:8000 -R term-testvm:80:localhost:7681 regional.example.com"
 if [ -s /home/vscode/.ssh/sish_tunnel_key_id_ed25519 ]; then pass "  creates the key on first start"; else fail "  creates the key on first start"; fi
 reset_state; rm /etc/glueops/tunnel_endpoint
 run su vscode -c codespace-tunnel
@@ -104,6 +106,29 @@ expect_rc "no endpoint file: fails" 1
 expect_no_call "  no endpoint file: no ssh" "ssh "
 if grep -qx 'ConditionFileNotEmpty=/etc/glueops/tunnel_endpoint' /etc/systemd/system/codespace-tunnel.service; then
     pass "  unit only starts with an endpoint"; else fail "  unit only starts with an endpoint"; fi
+
+echo "== codespace-terminal"
+reset_state; token
+run su vscode -c codespace-terminal
+expect_call "login shell on loopback: writable, origin-checked, no notice logs, pings inside sish's idle timeout, token as the password" \
+    "ttyd -i lo -p 7681 -W -O -d 3 -P 2 -t titleFixed=VM testvm -c REDACTED bash -l cred=ok [as vscode]"
+reset_state
+run su vscode -c codespace-terminal
+expect_rc "no token: fails" 1
+expect_no_call "  no token: no ttyd" "ttyd "
+reset_state; head -c 129 /dev/zero | tr '\0' a > /etc/glueops/cde_token
+run su vscode -c codespace-terminal
+expect_rc "token over 128 characters: fails" 1
+expect_no_call "  token over 128 characters: no ttyd" "ttyd "
+if grep -q '^exec ttyd .* > /dev/null 2>&1$' /usr/local/bin/codespace-terminal; then
+    pass "  ttyd's output (its command line holds the token) is discarded"
+else fail "  ttyd's output (its command line holds the token) is discarded"; fi
+for line in User=vscode BindsTo=codespace-tunnel.service WantedBy=codespace-tunnel.service KillMode=process Restart=always; do
+    if grep -qx "$line" /etc/systemd/system/codespace-terminal.service; then pass "  unit has $line"; else fail "  unit has $line"; fi
+done
+if grep -qx RestartMode=direct /etc/systemd/system/codespace-tunnel.service; then
+    pass "  tunnel unit has RestartMode=direct: reconnects don't stop the terminal"
+else fail "  tunnel unit has RestartMode=direct: reconnects don't stop the terminal"; fi
 
 echo "== dev"
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
@@ -126,10 +151,16 @@ reset_state; token; state container running; state cmd '["bash","-lc","exec code
 run dev status
 expect_rc "status, editor + tunnel up: healthy" 0
 if grep -qF "https://testvm.regional.example.com" <<< "$out"; then pass "  prints the URL"; else fail "  prints the URL"; fi
+if grep -qF "terminal   activating" <<< "$out"; then pass "  terminal not up: shown, still healthy"; else fail "  terminal not up: shown, still healthy ($out)"; fi
+state terminal_active 1
+run dev status
+expect_rc "status, terminal up: healthy" 0
+if grep -qF "terminal   up  https://term-testvm.regional.example.com" <<< "$out"; then pass "  prints the terminal URL"; else fail "  prints the terminal URL ($out)"; fi
 : > /etc/glueops/tunnel_endpoint
 run dev status
 expect_rc "status, empty endpoint file: unhealthy" 1
-if grep -qF "no endpoint" <<< "$out" && ! grep -qF "  url" <<< "$out"; then pass "  says so, prints no URL"; else fail "  says so, prints no URL ($out)"; fi
+if grep -qF "no endpoint" <<< "$out" && ! grep -qE "  (url|terminal) " <<< "$out"; then pass "  says so, prints no URLs"; else fail "  says so, prints no URLs ($out)"; fi
+rm "$STATE/terminal_active"
 echo regional.example.com > /etc/glueops/tunnel_endpoint
 state http 000
 run dev status
@@ -200,6 +231,9 @@ if grep -q -- "serve-web --commit-id ddd444 " /tmp/trust-code-args; then pass " 
 rm -rf "$th" /usr/local/bin/code /usr/share/code /tmp/trust-code-args
 
 echo "== no output contains the token"
-if grep -qF "$TOKEN" <<< "$all_output$(cat "$STATE/calls")"; then fail "token value found in output"; else pass "token never printed"; fi
+# ttyd only ever prints the credential base64-encoded.
+b64="$(printf 'cde:%s' "$TOKEN" | base64 -w0)"
+everything="$all_output$(cat "$STATE/calls")"
+if grep -qF -e "$TOKEN" -e "$b64" <<< "$everything"; then fail "token found in output"; else pass "token never printed, raw or base64"; fi
 
 [ "$fails" = 0 ] || { echo "$fails FAILED"; exit 1; }

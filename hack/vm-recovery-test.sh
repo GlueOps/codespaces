@@ -45,10 +45,14 @@ on 'docker update --restart=unless-stopped codespace > /dev/null'
 
 if [ "$mode" = web ]; then
     before=$(on 'systemctl show -p NRestarts --value codespace-tunnel')
+    term_pid=$(on 'systemctl show -p MainPID --value codespace-terminal')
     on 'pkill -9 -f "^ssh -N -T"'
     sleep 2 # let systemd see the ssh exit before polling health
     wait_healthy "tunnel ssh killed" 45
     changed "tunnel ssh killed" "$before" "$(on 'systemctl show -p NRestarts --value codespace-tunnel')"
+    if [ "$term_pid" != 0 ] && [ "$term_pid" = "$(on 'systemctl show -p MainPID --value codespace-terminal')" ]; then
+        echo "  ok   browser terminal kept running through the tunnel reconnect"
+    else echo "  FAIL browser terminal not running, or restarted with the tunnel"; fails=$((fails + 1)); fi
 fi
 
 on 'systemctl restart tailscaled'
@@ -65,13 +69,18 @@ else echo "  FAIL container was restarted by the docker restart"; fails=$((fails
 
 if [ "$mode" = web ]; then
     # shellcheck disable=SC2016 # expanded on the VM
-    leaks=$(on 'T=/etc/glueops/cde_token; n=0
-        docker inspect codespace | grep -qFf $T && n=$((n+1))
-        docker logs codespace 2>&1 | grep -qFf $T && n=$((n+1))
-        journalctl -b --no-pager | grep -qFf $T && n=$((n+1))
-        for p in /proc/[0-9]*; do [ "$p" = /proc/$$ ] && continue; grep -qaFf $T $p/cmdline 2> /dev/null && ! grep -qa grep $p/cmdline && n=$((n+1)); done
-        echo $n')
-    if [ "$leaks" = 0 ]; then echo "  ok   token not in docker inspect, docker logs, the journal or any command line"; else
+    # The patterns: the token, and the base64 of cde:<token> that ttyd prints. ttyd's own command
+    # line holds the token by design (it has no credential-file option); -o json includes the
+    # _CMDLINE journald stores with each line.
+    leaks=$(on 'P=$(mktemp); n=0; tok=$(cat /etc/glueops/cde_token)
+        { printf "%s\n" "$tok"; printf "cde:%s" "$tok" | base64 -w0; echo; } > $P
+        docker inspect codespace | grep -qFf $P && n=$((n+1))
+        docker logs codespace 2>&1 | grep -qFf $P && n=$((n+1))
+        journalctl -b -o json --no-pager | grep -qFf $P && n=$((n+1))
+        for p in /proc/[0-9]*; do [ "$p" = /proc/$$ ] && continue; [ "$(cat $p/comm 2> /dev/null)" = ttyd ] && continue
+            grep -qaFf $P $p/cmdline 2> /dev/null && ! grep -qa grep $p/cmdline && n=$((n+1)); done
+        rm -f $P; echo $n')
+    if [ "$leaks" = 0 ]; then echo "  ok   token not in docker inspect, docker logs, the journal or any command line but ttyd's"; else
         echo "  FAIL token found in $leaks places"; fails=$((fails + 1)); fi
 fi
 
