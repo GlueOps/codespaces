@@ -16,7 +16,8 @@ reset_state() {
     : > "$STATE/calls"
     chmod 666 "$STATE/calls"
     mkdir -p /etc/glueops
-    rm -f /etc/glueops/cde_token /etc/glueops/tunnel_endpoint
+    rm -f /etc/glueops/cde_token
+    echo regional.example.com > /etc/glueops/tunnel_endpoint
     echo v1 > /etc/glueops/codespace-tag
     : > /etc/glueops/codespace.env
 }
@@ -92,14 +93,17 @@ expect_rc "docker down: fails" 1
 expect_no_call "  docker down: no create" "docker run"
 
 echo "== codespace-tunnel"
-reset_state; echo regional.example.com > /etc/glueops/tunnel_endpoint
+reset_state
 rm -rf /home/vscode/.ssh
 run su vscode -c codespace-tunnel
-expect_call "regional endpoint: binds the hostname" "-l testvm -R testvm:80:localhost:8000 regional.example.com"
+expect_call "binds the hostname on the endpoint" "-l testvm -R testvm:80:localhost:8000 regional.example.com"
 if [ -s /home/vscode/.ssh/sish_tunnel_key_id_ed25519 ]; then pass "  creates the key on first start"; else fail "  creates the key on first start"; fi
-reset_state
+reset_state; rm /etc/glueops/tunnel_endpoint
 run su vscode -c codespace-tunnel
-expect_call "no endpoint file: legacy endpoint binds cde" "-l testvm -R cde:80:localhost:8000 tunnels.glueopshosted.com"
+expect_rc "no endpoint file: fails" 1
+expect_no_call "  no endpoint file: no ssh" "ssh "
+if grep -qx 'ConditionFileNotEmpty=/etc/glueops/tunnel_endpoint' /etc/systemd/system/codespace-tunnel.service; then
+    pass "  unit only starts with an endpoint"; else fail "  unit only starts with an endpoint"; fi
 
 echo "== dev"
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
@@ -119,10 +123,14 @@ run script -qec dev /dev/null
 expect_call "TTY, run already in progress: shows it from its start" "journalctl -f --since Tue 2026-11-03 02:07:45 UTC -o cat -u codespace-ensure.service"
 
 reset_state; token; state container running; state cmd '["bash","-lc","exec code-tunnel serve-web"]'; state tunnel_active 1
-echo regional.example.com > /etc/glueops/tunnel_endpoint
 run dev status
 expect_rc "status, editor + tunnel up: healthy" 0
-if grep -qF "https://testvm.regional.example.com" <<< "$out"; then pass "  prints the regional URL"; else fail "  prints the regional URL"; fi
+if grep -qF "https://testvm.regional.example.com" <<< "$out"; then pass "  prints the URL"; else fail "  prints the URL"; fi
+: > /etc/glueops/tunnel_endpoint
+run dev status
+expect_rc "status, empty endpoint file: unhealthy" 1
+if grep -qF "no endpoint" <<< "$out" && ! grep -qF "  url" <<< "$out"; then pass "  says so, prints no URL"; else fail "  says so, prints no URL ($out)"; fi
+echo regional.example.com > /etc/glueops/tunnel_endpoint
 state http 000
 run dev status
 expect_rc "status, editor not answering: unhealthy" 1

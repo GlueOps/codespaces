@@ -29,6 +29,8 @@ a crash or an out-of-memory kill.
   the container if it's stopped, and creates it from the image tag in `/etc/glueops/codespace-tag` if it's missing.
   A container you stop with `docker stop` is started again within a minute.
 - **`codespace-tunnel.service`** runs the sish reverse tunnel for the browser editor and reconnects whenever it drops.
+  It connects to the regional endpoint that cloud-init writes to `/etc/glueops/tunnel_endpoint`; without that file
+  there is no tunnel, and `dev status` says so.
 - Home (`/home/vscode`) and `/nix` are named volumes (`codespace-home`, `codespace-nix`), so a recreated container
   keeps your dotfiles, logins and devbox packages. The image build fills them, so a new codespace starts quickly;
   after `dev reset` the first start copies them again and takes a few minutes. `/workspaces/glueops` is on the VM's

@@ -87,31 +87,18 @@ CODESPACE_IMAGE_REPO=ghcr.repo.gpkg.io/glueops/codespaces
 CODESPACE_TAG_FILE=/etc/glueops/codespace-tag
 CODESPACE_TOKEN_FILE=/etc/glueops/cde_token
 CODESPACE_ENV_FILE=/etc/glueops/codespace.env
-CODESPACE_LEGACY_ENDPOINT=tunnels.glueopshosted.com
+CODESPACE_ENDPOINT_FILE=/etc/glueops/tunnel_endpoint
 
-# Regional sish endpoint written by cloud-init on newer VMs; older VMs have no file and stay on the
-# legacy central tunnel.
+# The regional sish endpoint, written by cloud-init; empty when the file is missing.
 codespace_tunnel_endpoint() {
-    local endpoint=""
-    [ -s /etc/glueops/tunnel_endpoint ] && endpoint="$(head -n1 /etc/glueops/tunnel_endpoint | tr -d '[:space:]')"
-    echo "${endpoint:-$CODESPACE_LEGACY_ENDPOINT}"
+    [ -s "$CODESPACE_ENDPOINT_FILE" ] || return 0
+    head -n1 "$CODESPACE_ENDPOINT_FILE" | tr -d '[:space:]'
 }
 
-# Legacy central sish runs --append-user-to-subdomain, so the VM binds "cde" and the URL becomes
-# cde-<hostname>.<endpoint>; regional instances don't, so the VM binds its bare hostname. The Slack
-# bot derives the access URL from the same rule (util/libvirt/libvirt-server.js cdeAccessUrl).
-codespace_tunnel_bind() {
-    if [ "$(codespace_tunnel_endpoint)" = "$CODESPACE_LEGACY_ENDPOINT" ]; then echo cde; else hostname; fi
-}
-
+# The VM binds its bare hostname. The Slack bot derives the access URL from the same rule
+# (util/libvirt/libvirt-server.js cdeAccessUrl).
 codespace_url() {
-    local endpoint
-    endpoint="$(codespace_tunnel_endpoint)"
-    if [ "$endpoint" = "$CODESPACE_LEGACY_ENDPOINT" ]; then
-        echo "https://cde-$(hostname).$endpoint"
-    else
-        echo "https://$(hostname).$endpoint"
-    fi
+    echo "https://$(hostname).$(codespace_tunnel_endpoint)"
 }
 CODESPACE_COMMON_EOF
 
@@ -222,6 +209,11 @@ if [ ! -f "$key" ]; then
     ssh-keygen -q -t ed25519 -N "" -C sish_tunnel_key -f "$key"
 fi
 
+endpoint="$(codespace_tunnel_endpoint)"
+if [ -z "$endpoint" ]; then
+    echo "codespace-tunnel: no endpoint in $CODESPACE_ENDPOINT_FILE" >&2
+    exit 1
+fi
 host="$(hostname)"
 # ExitOnForwardFailure + ServerAlive*: a refused forward or a dead path makes ssh exit, so systemd
 # reconnects instead of leaving a connected ssh with no tunnel.
@@ -231,7 +223,7 @@ exec ssh -N -T \
     -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
     -o IdentitiesOnly=yes -i "$key" \
-    -p 2222 -l "$host" -R "$(codespace_tunnel_bind):80:localhost:8000" "$(codespace_tunnel_endpoint)"
+    -p 2222 -l "$host" -R "$host:80:localhost:8000" "$endpoint"
 CODESPACE_TUNNEL_EOF
 
 sudo tee /usr/local/bin/dev > /dev/null <<'CODESPACE_DEV_EOF'
@@ -292,13 +284,16 @@ status() {
                 echo "  editor     not answering on 127.0.0.1:8000  (docker logs codespace)"
                 healthy=1
             fi
-            if systemctl is-active --quiet codespace-tunnel.service; then
+            if [ -z "$(codespace_tunnel_endpoint)" ]; then
+                echo "  tunnel     no endpoint: $CODESPACE_ENDPOINT_FILE is missing or empty"
+                healthy=1
+            elif systemctl is-active --quiet codespace-tunnel.service; then
                 echo "  tunnel     up  restarts=$(systemctl show -p NRestarts --value codespace-tunnel.service)"
             else
                 echo "  tunnel     $(systemctl is-active codespace-tunnel.service || true)  (sudo journalctl -u codespace-tunnel -n 20)"
                 healthy=1
             fi
-            echo "  url        $(codespace_url)  (use your Slack link: it carries your token)"
+            [ -n "$(codespace_tunnel_endpoint)" ] && echo "  url        $(codespace_url)  (use your Slack link: it carries your token)"
             ;;
         tunnel)
             local js tstate tname devcode
@@ -509,6 +504,7 @@ Description=sish reverse tunnel for the codespace editor
 After=network-online.target cloud-final.service
 Wants=network-online.target
 ConditionFileNotEmpty=/etc/glueops/cde_token
+ConditionFileNotEmpty=/etc/glueops/tunnel_endpoint
 StartLimitIntervalSec=0
 
 [Service]
