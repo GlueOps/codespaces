@@ -28,10 +28,13 @@ a crash or an out-of-memory kill.
 - **`codespace-ensure`** (`codespace-ensure.service`, at boot and every minute from `codespace-ensure.timer`) starts
   the container if it's stopped, and creates it from the image tag in `/etc/glueops/codespace-tag` if it's missing.
   A container you stop with `docker stop` is started again within a minute.
-- **`codespace-tunnel.service`** runs the sish reverse tunnel for the browser editor and reconnects whenever it drops.
-  It connects to the regional endpoint that cloud-init writes to `/etc/glueops/tunnel_endpoint`; without that file
-  there is no tunnel, and `dev status` says so.
-- **`codespace-terminal.service`** serves the browser terminal (below) on `127.0.0.1:7681`.
+- **`codespace-tunnel@editor`** and **`codespace-tunnel@terminal`** are the sish reverse tunnels, one ssh connection
+  each, for the browser editor and the VM terminal (below). Both come from one unit template and one script, and
+  reconnect the same way whenever they drop. Each runs only while its token is there (`cde_token`, `terminal_token`)
+  and the regional endpoint that cloud-init writes to `/etc/glueops/tunnel_endpoint`; `dev status` says which is
+  missing. `codespace-ensure` starts them before it touches Docker, so the terminal comes up even when the container
+  doesn't.
+- **`codespace-ttyd.service`** serves the VM terminal on `127.0.0.1:7681`, alongside `codespace-tunnel@terminal`.
 - Home (`/home/vscode`) and `/nix` are named volumes (`codespace-home`, `codespace-nix`), so a recreated container
   keeps your dotfiles, logins and devbox packages. The image build fills them, so a new codespace starts quickly;
   after `dev reset` the first start copies them again and takes a few minutes. `/workspaces/glueops` is on the VM's
@@ -51,23 +54,34 @@ dev reset    delete the container AND its home and /nix volumes, then create it 
 
 `dev status` shows the device code when a VS Code tunnel is waiting for its first login (it's also in
 `docker logs codespace`). After that first login the tunnel reconnects by itself. Low-level logs:
-`sudo journalctl -u codespace-ensure -u codespace-tunnel`. The secrets in `/etc/glueops/codespace.env` are passed to
+`sudo journalctl -u codespace-ensure -u 'codespace-tunnel@*' -u codespace-ttyd`. The secrets in `/etc/glueops/codespace.env` are passed to
 the container as environment variables, so they show in `docker inspect`, as before.
 
-### Browser terminal
+### VM terminal
 
-A shell on the VM itself (not in the codespace container) at `https://term-<hostname>.<endpoint>`, next to the editor's
-URL; `dev status` prints it. Sign in with Google, then at the browser's login prompt use user `cde` and the token from
-your Slack link (the `tkn=` value) as the password. It's a plain login shell as `vscode` (with sudo): the container is
-`docker exec -it codespace bash -l`.
+A shell on the VM itself (not in the codespace container) at `https://term-<hostname>.<endpoint>`, for every
+codespace, with or without the browser editor; `dev status` prints it. Sign in with Google, then at the browser's
+login prompt use user `vscode` and the VM terminal password from your Slack message (also in
+`/etc/glueops/terminal_token`, readable from any shell on the VM). It's a plain login shell as `vscode` (with sudo):
+the container is `docker exec -it codespace bash -l`.
 
 - The shell ends when the page disconnects (closing the tab, a tunnel reconnect, the 12-hour Google sign-in expiring).
   Run `tmux` (or `dev`) for anything that should keep running; reattach from the browser or over SSH. If the page keeps
   saying it's reconnecting, reload it to sign in again.
-- It runs only when the editor's tunnel does, so it doesn't help when the tunnel itself is down. Use SSH over Tailscale
-  for that.
-- `codespace-ensure` starts it again within a minute after a `systemctl stop`; to turn it off, run
-  `sudo systemctl disable --now codespace-terminal`.
+- It needs its sish tunnel, so it doesn't help when the tunnel itself is down. Use SSH over Tailscale for that.
+- To turn it off: `sudo systemctl disable --now codespace-tunnel@terminal` (that stops `codespace-ttyd` too, and
+  `codespace-ensure` leaves a disabled tunnel alone).
+
+The VM's side of the contract with the Slack bot, which writes these files through cloud-init (`root`, mode 0644):
+
+| File | Turns on | Format |
+|---|---|---|
+| `/etc/glueops/tunnel_endpoint` | both tunnels | the regional sish host, e.g. `<region>.tunnels.cde.glueopshosted.com` |
+| `/etc/glueops/cde_token` | the browser editor (serve-web) and `codespace-tunnel@editor` | the editor's connection token, `?tkn=` in its URL |
+| `/etc/glueops/terminal_token` | `codespace-tunnel@terminal` and `codespace-ttyd` | 32-128 letters and digits; the VM terminal password |
+
+The terminal password never goes in a URL. In a tunnel's journal, "remote port forwarding failed" means sish refused
+its name, e.g. because something else holds it.
 
 ## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`
 
@@ -141,7 +155,7 @@ To test a `pre-release` you will first to do the following:
 2) In the nonprod slack channel for the developer workspaces (e.g. `#testing-developer-workspaces`) run `!vm` and you should see the `pre-release` tag.
 3) Select the `pre-release` tag. The VM starts the codespace from that tag by itself; log in and run `dev` to see it.
 4) To try a different image tag on that VM: `export ENVIRONMENT=nonprod`, then `dev reset` and pick the tag. This deletes the container and its home and `/nix` volumes.
-5) Before promoting the `pre-release`, run `hack/vm-recovery-test.sh root@<vm>` against a nonprod VM created this way (one with a token and one without; on the one without, finish the device login first: the code is in `dev status`): it kills the editor, the tunnel and the container, restarts docker and tailscaled, and reboots, and checks the codespace comes back each time and the reboot keeps the VM's SSH host keys. Run it on a libvirt or Proxmox VM: they attach the cloud-init seed only at first boot, so only there does a reboot show whether cloud-init re-initialises the VM. Also check the first boot: the URL from Slack should work a few minutes after the VM is created, without logging in.
+5) Before promoting the `pre-release`, run `hack/vm-recovery-test.sh root@<vm>` against a nonprod VM created this way (one with a token and one without, both with a VM terminal; on the one without, finish the device login first: the code is in `dev status`): it kills the editor, each sish tunnel and the container, restarts docker and tailscaled, and reboots, and checks the codespace comes back each time and the reboot keeps the VM's SSH host keys. Run it on a libvirt or Proxmox VM: they attach the cloud-init seed only at first boot, so only there does a reboot show whether cloud-init re-initialises the VM. Also check the first boot: the URL from Slack should work a few minutes after the VM is created, without logging in.
 
 
 # Local Dev / Running packer locally:

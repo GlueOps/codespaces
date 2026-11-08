@@ -43,17 +43,35 @@ wait_healthy "container down with no restart policy" 150
 changed "container down with no restart policy" "$before" "$(started)"
 on 'docker update --restart=unless-stopped codespace > /dev/null'
 
-if [ "$mode" = web ]; then
-    before=$(on 'systemctl show -p NRestarts --value codespace-tunnel')
-    term_pid=$(on 'systemctl show -p MainPID --value codespace-terminal')
-    on 'pkill -9 -f "^ssh -N -T"'
-    sleep 2 # let systemd see the ssh exit before polling health
-    wait_healthy "tunnel ssh killed" 45
-    changed "tunnel ssh killed" "$before" "$(on 'systemctl show -p NRestarts --value codespace-tunnel')"
-    if [ "$term_pid" != 0 ] && [ "$term_pid" = "$(on 'systemctl show -p MainPID --value codespace-terminal')" ]; then
-        echo "  ok   browser terminal kept running through the tunnel reconnect"
-    else echo "  FAIL browser terminal not running, or restarted with the tunnel"; fails=$((fails + 1)); fi
-fi
+# Each sish tunnel on its own: killing one must bring it back without touching the other one or ttyd.
+nrestarts() { on "systemctl show -p NRestarts --value codespace-tunnel@$1"; }
+ttyd_pid() { on 'systemctl show -p MainPID --value codespace-ttyd'; }
+# One unit per is-active: with several, it succeeds when any one of them is active.
+terminal_up() { # <label>
+    on 'test -s /etc/glueops/terminal_token' || return 0
+    if on 'systemctl is-active --quiet codespace-tunnel@terminal && systemctl is-active --quiet codespace-ttyd'; then
+        echo "  ok   VM terminal up $1"
+    else echo "  FAIL VM terminal not up $1 (dev status)"; fails=$((fails + 1)); fi
+}
+terminal_up "at the start"
+for t in editor terminal; do
+    on "systemctl is-active --quiet codespace-tunnel@$t" || continue
+    other=terminal; [ "$t" = terminal ] && other=editor
+    before=$(nrestarts "$t"); before_other=$(nrestarts "$other"); pid=$(ttyd_pid)
+    on "systemctl kill -s KILL --kill-whom=main codespace-tunnel@$t"
+    back=0
+    for _ in $(seq 1 15); do
+        sleep 3
+        [ "$(nrestarts "$t")" != "$before" ] && on "systemctl is-active --quiet codespace-tunnel@$t" && { back=1; break; }
+    done
+    if [ "$back" = 1 ]; then
+        echo "  ok   $t tunnel reconnected"
+    else echo "  FAIL $t tunnel not back after its ssh was killed"; fails=$((fails + 1)); fi
+    if [ "$before_other" = "$(nrestarts "$other")" ] && [ "$pid" = "$(ttyd_pid)" ]; then
+        echo "  ok   $other tunnel and ttyd untouched"
+    else echo "  FAIL killing the $t tunnel restarted the $other tunnel or ttyd"; fails=$((fails + 1)); fi
+done
+wait_healthy "tunnels killed" 45
 
 on 'systemctl restart tailscaled'
 if on 'sleep 3; docker exec codespace test -S /var/run/tailscale/tailscaled.sock'; then
@@ -67,22 +85,23 @@ if [ "$before" = "$(started)" ]; then
     echo "  ok   container kept running through the docker restart (live-restore)"
 else echo "  FAIL container was restarted by the docker restart"; fails=$((fails + 1)); fi
 
-if [ "$mode" = web ]; then
-    # shellcheck disable=SC2016 # expanded on the VM
-    # The patterns: the token, and the base64 of cde:<token> that ttyd prints. ttyd's own command
-    # line holds the token by design (it has no credential-file option); -o json includes the
-    # _CMDLINE journald stores with each line.
-    leaks=$(on 'P=$(mktemp); n=0; tok=$(cat /etc/glueops/cde_token)
-        { printf "%s\n" "$tok"; printf "cde:%s" "$tok" | base64 -w0; echo; } > $P
+# shellcheck disable=SC2016 # expanded on the VM
+# The patterns: each token, and the base64 of vscode:<terminal token> that ttyd prints. ttyd's own
+# command line holds the terminal token by design (it has no credential-file option); -o json includes
+# the _CMDLINE journald stores with each line. An empty pattern would match everything, so only tokens
+# that exist are added.
+leaks=$(on 'P=$(mktemp); n=0; c=$(cat /etc/glueops/cde_token 2> /dev/null); t=$(cat /etc/glueops/terminal_token 2> /dev/null)
+    { [ -n "$c" ] && printf "%s\n" "$c"; [ -n "$t" ] && { printf "%s\n" "$t"; printf "vscode:%s" "$t" | base64 -w0; echo; }; } > $P
+    if [ -s $P ]; then
         docker inspect codespace | grep -qFf $P && n=$((n+1))
         docker logs codespace 2>&1 | grep -qFf $P && n=$((n+1))
         journalctl -b -o json --no-pager | grep -qFf $P && n=$((n+1))
         for p in /proc/[0-9]*; do [ "$p" = /proc/$$ ] && continue; [ "$(cat $p/comm 2> /dev/null)" = ttyd ] && continue
             grep -qaFf $P $p/cmdline 2> /dev/null && ! grep -qa grep $p/cmdline && n=$((n+1)); done
-        rm -f $P; echo $n')
-    if [ "$leaks" = 0 ]; then echo "  ok   token not in docker inspect, docker logs, the journal or any command line but ttyd's"; else
-        echo "  FAIL token found in $leaks places"; fails=$((fails + 1)); fi
-fi
+    fi
+    rm -f $P; echo $n')
+if [ "$leaks" = 0 ]; then echo "  ok   tokens not in docker inspect, docker logs, the journal or any command line but ttyd's"; else
+    echo "  FAIL a token found in $leaks places"; fails=$((fails + 1)); fi
 
 boot=$(on 'cat /proc/sys/kernel/random/boot_id')
 hostkeys=$(on 'cat /etc/ssh/ssh_host_*_key.pub | sort')
@@ -99,5 +118,6 @@ if [ "$hostkeys" = "$(on 'cat /etc/ssh/ssh_host_*_key.pub | sort')" ]; then
 else
     echo "  FAIL SSH host keys changed on reboot (cloud-init treated the VM as new)"; fails=$((fails + 1))
 fi
+terminal_up "after the reboot"
 
 [ "$fails" = 0 ] && echo "ALL PASS" || { echo "$fails FAILED"; exit 1; }

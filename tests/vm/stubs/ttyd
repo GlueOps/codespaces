@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Logs its arguments with the -c value replaced, and whether that value was cde:<the token file>, so
-# no test log ever holds the token.
+# Logs its arguments with the -c value replaced, and whether that value was vscode:<terminal_token>,
+# so no test log ever holds the token.
 S=${STATE:-/tmp/vmstate}
 args=() cred=none
 while [ $# -gt 0 ]; do
     if [ "$1" = -c ]; then
-        [ "$2" = "cde:$(cat /etc/glueops/cde_token)" ] && cred=ok || cred=wrong
+        [ "$2" = "vscode:$(cat /etc/glueops/terminal_token)" ] && cred=ok || cred=wrong
         args+=(-c REDACTED); shift 2; continue
     fi
     args+=("$1"); shift

@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 S=${STATE:-/tmp/vmstate}
 echo "systemctl $* [as $(id -un)]" >> "$S/calls"
+unit="${*: -1}"
+unit="${unit%.service}"
 case "$*" in
-    "is-active --quiet codespace-tunnel.service") [ -e "$S/tunnel_active" ] ;;
-    "is-active codespace-tunnel.service") if [ -e "$S/tunnel_active" ]; then echo active; else echo activating; exit 3; fi ;;
-    "show -p NRestarts --value codespace-tunnel.service") echo 0 ;;
-    "is-active --quiet codespace-terminal.service") [ -e "$S/terminal_active" ] ;;
-    "is-active codespace-terminal.service") if [ -e "$S/terminal_active" ]; then echo active; else echo activating; exit 3; fi ;;
     "show -p ActiveState --value codespace-ensure.service") [ -e "$S/ensure_running" ] && echo activating || echo inactive ;;
     "show -p InactiveExitTimestamp --value codespace-ensure.service") echo "Tue 2026-11-03 02:07:45 UTC" ;;
     # Stands in for someone giving up on a long create: kill dev reset mid-run.
     # Takes a moment, like the real one: dev's backgrounded journal follower must get to log its call.
     "start codespace-ensure.service") [ -e "$S/kill_reset" ] && pkill -TERM -f "bash /usr/local/bin/dev reset"; sleep 1; exit 0 ;;
+    # Any other unit is active while $S/active_<unit> exists, and enabled unless $S/disabled_<unit> does.
+    "is-active --quiet "*) [ -e "$S/active_$unit" ] ;;
+    "is-active "*) if [ -e "$S/active_$unit" ]; then echo active; else echo activating; exit 3; fi ;;
+    "is-enabled --quiet "*) [ ! -e "$S/disabled_$unit" ] ;;
+    "show -p NRestarts --value "*) echo 0 ;;
     *) exit 0 ;;
 esac

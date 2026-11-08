@@ -9,9 +9,10 @@ platform, and the VM setup that runs it as a cloud development environment (CDE)
   (`cde-boot`, `cde-init`, `cde-trust-serve-web`, `captain_utils`, `gluekube_ssh`, ...).
 - `developer-setup.sh`: VM setup, run at golden-image build (Packer) and by the break-glass `curl setup.glueops.dev |
   bash`. It embeds the VM's scripts and systemd units as heredocs, so it must stay a single self-contained file:
-  `codespace-ensure`, `codespace-tunnel`, `codespace-terminal`, `dev`, `/usr/local/lib/codespace/common.sh`, and the
-  `codespace-ensure.{service,timer}`, `codespace-tunnel.service` and `codespace-terminal.service` units. README "The
-  codespace VM" explains them.
+  `codespace-ensure`, `codespace-tunnel`, `codespace-ttyd`, `dev`, `/usr/local/lib/codespace/common.sh`, and the
+  `codespace-ensure.{service,timer}`, `codespace-tunnel@.service` (instances `editor`, `terminal`) and
+  `codespace-ttyd.service` units. README "The codespace VM" explains them, and its "VM terminal" section has the
+  files the Slack bot writes.
 - `qemu.pkr.hcl`, `os-setup-start.sh`, `os-setup-finish.sh`: the Packer VM image.
 - `hack/`: test runners (`hack/test.sh` runs them all) and `hack/vm-recovery-test.sh` (manual, against a real VM).
 - `tests/vm/`: behaviour tests and stubs for the VM scripts. App tests live under `.devcontainer/tests/<app>/`.
@@ -30,13 +31,15 @@ platform, and the VM setup that runs it as a cloud development environment (CDE)
   (`curl | bash` feeds the script on stdin).
 - Units that run after cloud-final must be `WantedBy=cloud-init.target`, never `multi-user.target`: cloud-final is
   ordered after multi-user.target, and the cycle makes systemd drop the job at boot. The VM test suite checks this.
-  `codespace-terminal.service` is wanted by `codespace-tunnel.service` instead, which is wanted by cloud-init.target.
-- The connection token (`/etc/glueops/cde_token`) never goes on a command line, into the environment or into logs.
-  `code serve-web` prints it on stdout, so its stdout is discarded. One exception: ttyd's `-c` (it has no
-  credential-file option), so `ps` and `systemctl status codespace-terminal` show it. journald stores the command line
-  with every line a process logs, so ttyd's output is discarded too (the script's own lines, before it execs ttyd,
-  still reach the journal). Leak checks look for the token and for the base64 of `cde:<token>`, which is what ttyd
-  prints.
+  `codespace-ttyd.service` is wanted by `codespace-tunnel@terminal.service` instead, which is wanted by
+  cloud-init.target.
+- The tokens (`/etc/glueops/cde_token`, `/etc/glueops/terminal_token`) never go on a command line, into the
+  environment, into logs or into a URL the VM prints. `code serve-web` prints the editor's on stdout, so its stdout is
+  discarded. One exception: the terminal token on ttyd's `-c` (ttyd has no credential-file option), so `ps` and
+  `systemctl status codespace-ttyd` show it; hints point to `journalctl`, never `systemctl status`. journald stores
+  the command line with every line a process logs, so ttyd's output is discarded too (the script's own lines, before
+  it execs ttyd, still reach the journal). Leak checks look for each token and for the base64 of `vscode:<terminal
+  token>`, which is what ttyd prints.
 - `packer-qemu.yml` is triggered by `workflow_run`, so it always runs the default branch's copy: a tag builds its own
   `qemu.pkr.hcl` with `main`'s workflow (runner, env, `PKR_VAR_*`). A pre-release can't test edits to that workflow,
   and `qemu.pkr.hcl`'s defaults must work under `main`'s.
@@ -70,10 +73,12 @@ Settled; reviewers shouldn't re-raise these.
 - `dev` keeps the `dev` tmux session (windows `logs` and `shell`) for people who log in. In browser-editor mode the
   `logs` window follows the unit journals; the container's own output is a `docker logs codespace` hint in `dev status`.
 - Free disk space in `dev status` is information only; it doesn't make the codespace unhealthy.
-- The browser terminal (ttyd) is a plain login shell on the VM: nothing runs on connect, and work outside tmux ends
-  when the page disconnects. Login is the tunnel's Google SSO plus basic auth with the connection token; there's no
-  owner check, same as the editor. It shares the editor's ssh connection, so it runs exactly when the tunnel does,
-  and a refused `term-<hostname>` bind takes the editor's forward down with it.
+- The VM terminal (ttyd) is a plain login shell on the VM: nothing runs on connect, and work outside tmux ends when the
+  page disconnects. Login is the tunnel's Google SSO plus basic auth as `vscode` with its own `terminal_token`, separate
+  from the editor's token; there's no owner check, same as the editor. Every codespace gets it, with or without the
+  browser editor.
+- The editor and the terminal each have their own sish tunnel (one template, one script), so a refused name on one
+  doesn't drop the other. `systemctl disable --now codespace-tunnel@<name>` is the off switch.
 - A terminal fault is information only in `dev status`; it doesn't make the codespace unhealthy.
 - Accepted edge cases, not fixed:
   - A tmux server started from the browser outlives ttyd (`KillMode=process`), so systemd may report left-over processes

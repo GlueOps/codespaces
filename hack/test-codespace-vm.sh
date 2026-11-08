@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs the VM-side checks for developer-setup.sh: the scripts and systemd units it embeds as heredocs
-# (codespace-ensure, codespace-tunnel, dev, and their units). Needs docker: everything runs inside a
+# (codespace-ensure, codespace-tunnel, codespace-ttyd, dev, and their units). Needs docker: everything runs inside a
 # throwaway debian:13 container, the OS the VMs run, so the real systemd, cloud-init and sudo are used.
 #   1. each embedded file is present and non-empty; bash -n and shellcheck on the scripts
 #   2. systemd-analyze verify with cloud-init installed: no ordering cycle (the old launch-dev unit
@@ -26,12 +26,12 @@ files=(
     CODESPACE_COMMON_EOF:/usr/local/lib/codespace/common.sh
     CODESPACE_ENSURE_EOF:/usr/local/bin/codespace-ensure
     CODESPACE_TUNNEL_EOF:/usr/local/bin/codespace-tunnel
-    CODESPACE_TERMINAL_EOF:/usr/local/bin/codespace-terminal
+    CODESPACE_TTYD_EOF:/usr/local/bin/codespace-ttyd
     CODESPACE_DEV_EOF:/usr/local/bin/dev
     CODESPACE_ENSURE_UNIT_EOF:/etc/systemd/system/codespace-ensure.service
     CODESPACE_ENSURE_TIMER_EOF:/etc/systemd/system/codespace-ensure.timer
-    CODESPACE_TUNNEL_UNIT_EOF:/etc/systemd/system/codespace-tunnel.service
-    CODESPACE_TERMINAL_UNIT_EOF:/etc/systemd/system/codespace-terminal.service
+    CODESPACE_TUNNEL_UNIT_EOF:/etc/systemd/system/codespace-tunnel@.service
+    CODESPACE_TTYD_UNIT_EOF:/etc/systemd/system/codespace-ttyd.service
 )
 echo "== extract embedded files"
 mkdir -p /usr/local/lib/codespace
@@ -41,9 +41,9 @@ for f in "${files[@]}"; do
     [ -s "$path" ] || { echo "  FAIL: $delim heredoc missing or empty in developer-setup.sh" >&2; exit 1; }
     echo "  $delim -> $path ($(wc -l < "$path") lines)"
 done
-chmod 755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-terminal /usr/local/bin/dev
+chmod 755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-ttyd /usr/local/bin/dev
 
-scripts=(/usr/local/lib/codespace/common.sh /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-terminal /usr/local/bin/dev)
+scripts=(/usr/local/lib/codespace/common.sh /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-ttyd /usr/local/bin/dev)
 echo "== bash -n"
 for f in developer-setup.sh "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh hack/vm-recovery-test.sh; do bash -n "$f"; done
 echo "== shellcheck $(shellcheck --version | awk '/^version:/{print $2}')"
@@ -59,7 +59,7 @@ echo "== systemd-analyze verify"
 # it does. Link it in by hand or the units hung off it are never checked. verify exits 0 even when
 # it finds a cycle, so the output is what's checked.
 ln -sf /lib/systemd/system/cloud-init.target /etc/systemd/system/multi-user.target.wants/cloud-init.target
-systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel.service codespace-terminal.service 2> /dev/null
+systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@terminal.service codespace-ttyd.service 2> /dev/null
 verify() { systemd-analyze verify --man=no default.target 2>&1 || true; }
 out="$(verify)"
 if grep -qi 'ordering cycle' <<< "$out"; then
@@ -83,7 +83,7 @@ if grep -qF -- "--entrypoint true $vols" developer-setup.sh && grep -qF -- "$vol
 else echo "  FAIL: the build-time volume fill and codespace-ensure use different volumes" >&2; exit 1; fi
 
 echo "== units enabled at setup"
-if grep -qx 'sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel.service codespace-terminal.service' developer-setup.sh; then
+if grep -qx 'sudo systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel@editor.service codespace-tunnel@terminal.service codespace-ttyd.service' developer-setup.sh; then
     echo "  ok   developer-setup.sh enables every unit"
 else echo "  FAIL: developer-setup.sh doesn't enable every unit" >&2; exit 1; fi
 
