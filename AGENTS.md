@@ -6,7 +6,9 @@ platform, and the VM setup that runs it as a cloud development environment (CDE)
 ## Repo map
 
 - `.devcontainer/Dockerfile`: the codespace image. `.devcontainer/tools/` holds the tools installed into it
-  (`cde-boot`, `cde-init`, `cde-trust-serve-web`, `captain_utils`, `gluekube_ssh`, ...).
+  (`cde-boot`, `cde-init`, `cde-trust-serve-web`, `captain_utils`, `gluekube_ssh`, ...), including the `tofu` wrapper
+  (`tools/tofu.sh`; the real binary is `/usr/local/libexec/tofu`). `.devcontainer/misc-configs/tofurc` becomes
+  `~/.tofurc` (README "OpenTofu mirror").
 - `developer-setup.sh`: VM setup, run at golden-image build (Packer) and by the break-glass `curl setup.glueops.dev |
   bash`. It embeds the VM's scripts and systemd units as heredocs, so it must stay a single self-contained file:
   `codespace-ensure`, `codespace-tunnel`, `dev`, `/usr/local/lib/codespace/common.sh`, and the
@@ -64,6 +66,9 @@ Settled; reviewers shouldn't re-raise these.
 - `dev` keeps the `dev` tmux session (windows `logs` and `shell`) for people who log in. In browser-editor mode the
   `logs` window follows the unit journals; the container's own output is a `docker logs codespace` hint in `dev status`.
 - Free disk space in `dev status` is information only; it doesn't make the codespace unhealthy.
+- OpenTofu mirror (README "OpenTofu mirror"): no fallback to upstream; while the mirror is down `tofu init` fails.
+  Deleting `~/.tofurc` is the only off switch; there's no opt-out variable and no failure hint. Only new home volumes
+  get `~/.tofurc`. The `tofu` wrapper has no test suite.
 - Accepted edge cases, not fixed:
   - `dev reset` doesn't wait for an ensure run already in progress.
   - `dev reset` with no terminal just refuses to run; there's no `--yes` flag.

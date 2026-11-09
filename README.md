@@ -64,6 +64,25 @@ Every step is best-effort and non-fatal; unconfigured inputs are skipped. It run
 
 Because the default GitHub auth is token-based, running `yolo` afterward is a smooth no-op (it detects the existing auth and skips the interactive browser login).
 
+## OpenTofu mirror
+
+New codespaces fetch OpenTofu providers and GitHub-hosted modules through the
+[tofu-cache](https://github.com/GlueOps/tofu-cache) mirror on `repo.gpkg.io`, so `tofu init` keeps working when
+GitHub is slow or down.
+
+- `~/.tofurc` points `registry.opentofu.org` and `registry.terraform.io` provider installs at the mirror. Installs stay
+  signed, and lock files are unchanged.
+- `tofu` (and `terraform`) is a small wrapper (`.devcontainer/tools/tofu.sh`, real binary in `/usr/local/libexec/tofu`).
+  On `init` and `get` it sends that command's `https://github.com/` module clones through the mirror; your own `git`
+  is never rewritten.
+- There is no fallback: while the mirror is down, `tofu init` fails.
+- The mirror is public-only: a private GitHub module over HTTPS fails through it.
+- **To turn it off, delete `~/.tofurc`.** The wrapper then does nothing.
+- Only new home volumes get `~/.tofurc`. In an existing codespace, copy
+  `.devcontainer/misc-configs/tofurc` to `~/.tofurc` to opt in.
+- A `tofu` installed with devbox or nix comes first on `PATH` and skips the wrapper: providers still use `~/.tofurc`,
+  but modules go direct.
+
 ## `captain_utils`: upgrading a cluster
 
 `captain_utils` is the menu an operator drives a cluster upgrade from, run at the captain repo root. Its components
