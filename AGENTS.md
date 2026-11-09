@@ -66,10 +66,9 @@ Settled; reviewers shouldn't re-raise these.
 - `dev` keeps the `dev` tmux session (windows `logs` and `shell`) for people who log in. In browser-editor mode the
   `logs` window follows the unit journals; the container's own output is a `docker logs codespace` hint in `dev status`.
 - Free disk space in `dev status` is information only; it doesn't make the codespace unhealthy.
-- OpenTofu mirror (README "OpenTofu mirror"): deleting `~/.tofurc` is the only off switch; there's no opt-out
-  variable and no failure hint. Only new home volumes get `~/.tofurc`. The `tofu` wrapper has no test suite. While the
-  mirror is unreachable, its fallback (`TF_CLI_CONFIG_FILE=/dev/null`) also skips `~/.terraform.d` credentials;
-  accepted, since only public modules are used.
+- OpenTofu mirror (README "OpenTofu mirror"): no fallback to upstream; while the mirror is down `tofu init` fails.
+  Deleting `~/.tofurc` is the only off switch; there's no opt-out variable and no failure hint. Only new home volumes
+  get `~/.tofurc`. The `tofu` wrapper has no test suite.
 - Accepted edge cases, not fixed:
   - `dev reset` doesn't wait for an ensure run already in progress.
   - `dev reset` with no terminal just refuses to run; there's no `--yes` flag.

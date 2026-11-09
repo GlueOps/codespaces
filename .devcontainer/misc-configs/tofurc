@@ -1,6 +1,6 @@
 # OpenTofu providers through the GlueOps tofu-cache mirror (https://github.com/GlueOps/tofu-cache).
-# The tofu wrapper also sends GitHub module clones through it, and falls back to upstream
-# when it's unreachable. Delete this file to turn the mirror off.
+# The tofu wrapper also sends GitHub module clones through it. Delete this file to turn
+# the mirror off.
 host "registry.opentofu.org" {
   services = {
     "providers.v1" = "https://repo.gpkg.io/repository/tofu/registry.opentofu.org/v1/providers/"

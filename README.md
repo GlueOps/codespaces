@@ -73,15 +73,15 @@ GitHub is slow or down.
 - `~/.tofurc` points `registry.opentofu.org` and `registry.terraform.io` provider installs at the mirror. Installs stay
   signed, and lock files are unchanged.
 - `tofu` (and `terraform`) is a small wrapper (`.devcontainer/tools/tofu.sh`, real binary in `/usr/local/libexec/tofu`).
-  On `init`, `get` and `providers lock|mirror` it checks the mirror first. When the mirror answers, it sends that
-  command's `https://github.com/` module clones through it; your own `git` is never rewritten. When it doesn't, it
-  prints `tofu: mirror ... unreachable; using upstream directly` and runs without `~/.tofurc`.
+  On `init` and `get` it sends that command's `https://github.com/` module clones through the mirror; your own `git`
+  is never rewritten.
+- There is no fallback: while the mirror is down, `tofu init` fails.
 - The mirror is public-only: a private GitHub module over HTTPS fails through it.
 - **To turn it off, delete `~/.tofurc`.** The wrapper then does nothing.
 - Only new home volumes get `~/.tofurc`. In an existing codespace, copy
   `.devcontainer/misc-configs/tofurc` to `~/.tofurc` to opt in.
 - A `tofu` installed with devbox or nix comes first on `PATH` and skips the wrapper: providers still use `~/.tofurc`,
-  but modules go direct and there's no fallback.
+  but modules go direct.
 
 ## `captain_utils`: upgrading a cluster
 
