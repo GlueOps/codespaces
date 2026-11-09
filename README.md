@@ -67,8 +67,9 @@ Every codespace, with or without the browser editor, has two shells in the brows
 | **Codespace shell** | inside the codespace container: your tools and logins, like the editor's terminal | `https://shell-<hostname>.<endpoint>` | everyday work without opening the editor |
 | **VM shell** | on the VM itself, as `vscode` with sudo | `https://vm-<hostname>.<endpoint>` | when the container or editor is broken: `dev status`, `dev reset`, `docker logs codespace` |
 
-Sign in with Google, then at the browser's login prompt use user `vscode` and the shell password from your Slack
-message (also in `/etc/glueops/shell_token`, readable from the VM shell). Both shells use the same password.
+Open them from the links in your Slack message: sign in with Google, and the link itself carries the shell password
+(user `vscode`). If the browser asks for a password on your first click, cancel and click the link again. Both shells
+use the same password, which is also in `/etc/glueops/shell_token`, readable from the VM shell.
 
 - A shell ends when its page disconnects (closing the tab, a tunnel reconnect, the 12-hour Google sign-in expiring), and
   so does anything you started in it. Run `tmux` for anything that should keep running; each shell has its own tmux,
@@ -88,7 +89,8 @@ The VM's side of the contract with the Slack bot, which writes these files throu
 | `/etc/glueops/cde_token` | the browser editor (serve-web) and `codespace-tunnel@editor` | the editor's connection token, `?tkn=` in its URL |
 | `/etc/glueops/shell_token` | both shells: `codespace-tunnel@{shell,vm}` and `codespace-ttyd@{shell,vm}` | 32-128 letters and digits; the shell password, user `vscode` |
 
-The editor is at `https://<hostname>.<endpoint>`. The shell password never goes in a URL. In a tunnel's journal, "remote port forwarding failed" means sish refused its
+The editor is at `https://<hostname>.<endpoint>`. The VM never prints the shell password; only the Slack bot's links
+carry it (`https://vscode:<password>@shell-<hostname>.<endpoint>/`). In a tunnel's journal, "remote port forwarding failed" means sish refused its
 name, e.g. because something else holds it.
 
 ## CDE bootstrap: `cde-init` / `CDE_SETUP_SCRIPT`

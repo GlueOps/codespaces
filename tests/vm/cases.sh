@@ -263,8 +263,8 @@ if row "codespace shell" "ttyd activating  \(sudo journalctl -u codespace-ttyd@s
 state active_codespace-ttyd@vm 1; state active_codespace-ttyd@shell 1
 run dev status
 expect_rc "status, shells up: healthy" 0
-if row "codespace shell" "up  https://shell-testvm.regional.example.com  \(user vscode" && row "vm shell" "up  https://vm-testvm.regional.example.com"; then
-    pass "  prints both shells' URLs and the user"; else fail "  prints both shells' URLs and the user ($out)"; fi
+if row "codespace shell" "up  https://shell-testvm.regional.example.com  \(open it from your Slack message's link; password in /etc/glueops/shell_token\)" && row "vm shell" "up  https://vm-testvm.regional.example.com"; then
+    pass "  prints both shells' URLs and where the password is"; else fail "  prints both shells' URLs and where the password is ($out)"; fi
 if grep -qF "$SHELL_TOKEN" <<< "$out"; then fail "  never prints the password"; else pass "  never prints the password"; fi
 : > /etc/glueops/tunnel_endpoint
 run dev status

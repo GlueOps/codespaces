@@ -111,7 +111,7 @@ codespace_tunnel_endpoint() {
 CODESPACE_ACCESS="editor shell vm"
 
 # The sish name each id binds: the editor its bare hostname, the shells <id>-<hostname>. The Slack bot
-# derives the access URLs from the same rule (util/libvirt/libvirt-server.js).
+# derives the access URLs from the same rule (util/codespace-links.js).
 codespace_bind() {
     case "$1" in
         editor) hostname ;;
@@ -423,7 +423,7 @@ shell_status() { # <id> <label>
     elif ! systemctl is-active --quiet "codespace-ttyd@$1.service"; then
         row "$2" "ttyd $(systemctl is-active "codespace-ttyd@$1.service" || true)  (sudo journalctl -u codespace-ttyd@$1 -n 20)"
     else
-        row "$2" "up  $(codespace_url "$1")  (user vscode, password: the shell password in your Slack message)"
+        row "$2" "up  $(codespace_url "$1")  (open it from your Slack message's link; password in /etc/glueops/shell_token)"
     fi
 }
 
