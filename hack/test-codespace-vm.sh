@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs the VM-side checks for developer-setup.sh: the scripts and systemd units it embeds as heredocs
-# (codespace-ensure, codespace-tunnel, dev, and their units). Needs docker: everything runs inside a
+# (codespace-ensure, codespace-tunnel, codespace-ttyd, dev, and their units). Needs docker: everything runs inside a
 # throwaway debian:13 container, the OS the VMs run, so the real systemd, cloud-init and sudo are used.
 #   1. each embedded file is present and non-empty; bash -n and shellcheck on the scripts
 #   2. systemd-analyze verify with cloud-init installed: no ordering cycle (the old launch-dev unit
@@ -26,10 +26,12 @@ files=(
     CODESPACE_COMMON_EOF:/usr/local/lib/codespace/common.sh
     CODESPACE_ENSURE_EOF:/usr/local/bin/codespace-ensure
     CODESPACE_TUNNEL_EOF:/usr/local/bin/codespace-tunnel
+    CODESPACE_TTYD_EOF:/usr/local/bin/codespace-ttyd
     CODESPACE_DEV_EOF:/usr/local/bin/dev
     CODESPACE_ENSURE_UNIT_EOF:/etc/systemd/system/codespace-ensure.service
     CODESPACE_ENSURE_TIMER_EOF:/etc/systemd/system/codespace-ensure.timer
-    CODESPACE_TUNNEL_UNIT_EOF:/etc/systemd/system/codespace-tunnel.service
+    CODESPACE_TUNNEL_UNIT_EOF:/etc/systemd/system/codespace-tunnel@.service
+    CODESPACE_TTYD_UNIT_EOF:/etc/systemd/system/codespace-ttyd@.service
 )
 echo "== extract embedded files"
 mkdir -p /usr/local/lib/codespace
@@ -39,9 +41,9 @@ for f in "${files[@]}"; do
     [ -s "$path" ] || { echo "  FAIL: $delim heredoc missing or empty in developer-setup.sh" >&2; exit 1; }
     echo "  $delim -> $path ($(wc -l < "$path") lines)"
 done
-chmod 755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/dev
+chmod 755 /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-ttyd /usr/local/bin/dev
 
-scripts=(/usr/local/lib/codespace/common.sh /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/dev)
+scripts=(/usr/local/lib/codespace/common.sh /usr/local/bin/codespace-ensure /usr/local/bin/codespace-tunnel /usr/local/bin/codespace-ttyd /usr/local/bin/dev)
 echo "== bash -n"
 for f in developer-setup.sh "${scripts[@]}" tests/vm/cases.sh tests/vm/stubs/* hack/test-codespace-vm.sh hack/vm-recovery-test.sh; do bash -n "$f"; done
 echo "== shellcheck $(shellcheck --version | awk '/^version:/{print $2}')"
@@ -57,7 +59,9 @@ echo "== systemd-analyze verify"
 # it does. Link it in by hand or the units hung off it are never checked. verify exits 0 even when
 # it finds a cycle, so the output is what's checked.
 ln -sf /lib/systemd/system/cloud-init.target /etc/systemd/system/multi-user.target.wants/cloud-init.target
-systemctl enable codespace-ensure.service codespace-ensure.timer codespace-tunnel.service 2> /dev/null
+# developer-setup.sh's own enable command (it spans lines), without sudo.
+enable_cmd=$(sed -n '/^sudo systemctl enable codespace-ensure/,/[^\\]$/p' developer-setup.sh)
+bash -c "${enable_cmd#sudo }" 2> /dev/null
 verify() { systemd-analyze verify --man=no default.target 2>&1 || true; }
 out="$(verify)"
 if grep -qi 'ordering cycle' <<< "$out"; then
@@ -79,6 +83,18 @@ vols='-v codespace-home:/home/vscode -v codespace-nix:/nix'
 if grep -qF -- "--entrypoint true $vols" developer-setup.sh && grep -qF -- "$vols \\" /usr/local/bin/codespace-ensure; then
     echo "  ok   same volumes and mount points"
 else echo "  FAIL: the build-time volume fill and codespace-ensure use different volumes" >&2; exit 1; fi
+
+echo "== units enabled at setup"
+for u in codespace-tunnel@editor codespace-tunnel@shell codespace-tunnel@vm codespace-ensure; do
+    [ -e "/etc/systemd/system/cloud-init.target.wants/$u.service" ] || { echo "  FAIL: $u isn't wanted by cloud-init.target" >&2; exit 1; }
+done
+[ -e /etc/systemd/system/timers.target.wants/codespace-ensure.timer ] || { echo "  FAIL: codespace-ensure.timer isn't enabled" >&2; exit 1; }
+echo "  ok   every tunnel and codespace-ensure enabled"
+# Only the two shells get a ttyd: enabling the bare template would hang one off every tunnel.
+wants=(/etc/systemd/system/codespace-tunnel@*.service.wants/codespace-ttyd@*)
+if [ "${#wants[@]}" = 2 ] && [ -e /etc/systemd/system/codespace-tunnel@shell.service.wants/codespace-ttyd@shell.service ] \
+    && [ -e /etc/systemd/system/codespace-tunnel@vm.service.wants/codespace-ttyd@vm.service ]; then echo "  ok   ttyd wanted by the shell and vm tunnels only"; else
+    echo "  FAIL: ttyd wants: ${wants[*]}" >&2; exit 1; fi
 
 echo "== behaviour"
 install -m 755 tests/vm/stubs/* /usr/local/bin/
