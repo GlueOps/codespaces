@@ -148,6 +148,25 @@ and deliberately off the PATH; its file header carries the full usage and the co
 test. (`hack/test.sh` runs every app's suite, including gluekube_ssh's, which requires python3, and the VM suite
 `hack/test-codespace-vm.sh` with `CODESPACE_VM_TEST_DOCKER=1`, which needs docker.)
 
+### Before an app chart bump: `app_chart_preflight`
+
+App chart bumps are done by hand, one captain at a time, by editing an ApplicationSet's chart `targetRevision` in
+`manifests/manifest.yaml`. Before that edit, run the preflight:
+
+```
+captain_utils → app_chart_preflight       # asks for the target, then "all" or one ApplicationSet
+app-chart-preflight --target 0.18.0       # the same, directly; --help lists the flags
+```
+
+It renders every tenant Application at the target through this cluster's Argo CD, so no tenant repository is read,
+and prints per ApplicationSet `ok`, `diff`, `error` or `unknown`. For each app that changes it prints the old and new
+`command`/`args` items, the tenant's values files and the pod-template diff. Bump only the sets reported `ok`; the
+command exits 0 only then. It is read-only: it uses your kube context, writes nothing to the cluster and sends
+nothing.
+
+The binary is copied from the `ghcr.io/glueops/argocd-app-chart-preflight` image pinned by
+`VERSION_APP_CHART_PREFLIGHT` in the Dockerfile ([GlueOps/argocd-app-chart-preflight](https://github.com/GlueOps/argocd-app-chart-preflight)).
+
 # Releasing:
 - Please stick to semver standards when dropping a new tag.
 - Once you publish a release a new image will be built and uploaded to GHCR.io: https://github.com/GlueOps/codespaces/pkgs/container/codespaces
