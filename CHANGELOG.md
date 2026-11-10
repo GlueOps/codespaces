@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.165.0](https://github.com/GlueOps/codespaces/compare/v0.164.0...v0.165.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* browser shells on the codespace VM ([#628](https://github.com/GlueOps/codespaces/issues/628))
+
+### Features
+
+* browser shells on the codespace VM ([#628](https://github.com/GlueOps/codespaces/issues/628)) ([4c00e8c](https://github.com/GlueOps/codespaces/commit/4c00e8c444cd7e8bc755ba06c8862131ee70b96f))
+
+
+### Dependencies
+
+* update docker/login-action digest to 8aa5831 ([#626](https://github.com/GlueOps/codespaces/issues/626)) ([7203e9f](https://github.com/GlueOps/codespaces/commit/7203e9f7f47f89843c05ba69a7d843a19ea40845))
+
 ## [0.164.0](https://github.com/GlueOps/codespaces/compare/v0.163.0...v0.164.0) (2026-11-03)
 
 
