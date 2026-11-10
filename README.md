@@ -164,8 +164,11 @@ and prints per ApplicationSet `ok`, `diff`, `error` or `unknown`. For each app t
 command exits 0 only then. It is read-only: it uses your kube context, writes nothing to the cluster and sends
 nothing.
 
-The binary is copied from the `ghcr.io/glueops/argocd-app-chart-preflight` image pinned by
-`VERSION_APP_CHART_PREFLIGHT` in the Dockerfile ([GlueOps/argocd-app-chart-preflight](https://github.com/GlueOps/argocd-app-chart-preflight)).
+It is one bash script, `.devcontainer/tools/app-chart-preflight.sh`, installed like the other tools. It starts one
+`argocd admin dashboard` on 127.0.0.1 for the run, with Argo CD's API on loopback only and your kube credentials, and
+renders each app twice against it, current chart and target, a few apps at a time (`--concurrency`, default 4). The
+exit code is 0 for safe to bump, 1 for a diff or error and 2 for no verdict. Tests: `hack/test-app-chart-preflight.sh`
+(stubbed kubectl and argocd, offline).
 
 # Releasing:
 - Please stick to semver standards when dropping a new tag.

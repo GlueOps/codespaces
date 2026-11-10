@@ -3,12 +3,6 @@
 # [Choice] Ubuntu version (use ubuntu-22.04 or ubuntu-18.04 on local arm64/Apple Silicon): ubuntu-22.04, ubuntu-20.04, ubuntu-18.04
 #https://mcr.microsoft.com/v2/devcontainers/base/tags/list
 #https://github.com/devcontainers/images/tree/main/src/base-ubuntu
-# app-chart-preflight (operator mode of GlueOps/argocd-app-chart-preflight): a static binary, copied out of its
-# image below. Pin the release tag and its digest together.
-# renovate: datasource=docker depName=ghcr.io/glueops/argocd-app-chart-preflight
-ARG VERSION_APP_CHART_PREFLIGHT=v0.1.0
-FROM ghcr.io/glueops/argocd-app-chart-preflight:${VERSION_APP_CHART_PREFLIGHT} AS app-chart-preflight
-
 FROM mcr.microsoft.com/vscode/devcontainers/base:2-ubuntu-22.04@sha256:81380e4c9c14e8a629ff39029639e4b7893e67400246fa7782a0fe7dc193a02a
 
 # [Optional] Uncomment this section to install additional OS packages.
@@ -70,9 +64,6 @@ RUN for file in /etc/tools/*; do \
         fi; \
     done && \
     rm -rf /etc/tools
-
-# Pre-bump check for the GlueOps app chart (captain_utils → app_chart_preflight, or run it directly)
-COPY --from=app-chart-preflight /argocd-app-chart-preflight /usr/local/bin/app-chart-preflight
 
 # Internal helpers that must stay OFF the PATH (used by captain_utils and gluekube_ssh by absolute path, not by people)
 COPY libexec/ /usr/local/libexec/
