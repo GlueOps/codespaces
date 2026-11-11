@@ -28,9 +28,9 @@ M
 run() { local n=$1 e=$2 i=$3; shift 3; run_case "$n" "$e" "$i" handle_app_chart_preflight "$@"; }
 
 run "F1 all sets, ok" production "0.18.0" all
-expect 'GUM CHOOSE \[all nonprod-application-set prod-application-set Back\]'; expect "PREFLIGHT --target 0.18.0$"; expect "safe to bump all to 0.18.0"; expect "RC=0"
+expect 'GUM CHOOSE \[all nonprod-application-set prod-application-set Back\]'; expect "PREFLIGHT --target 0.18.0$"; expect "bump only the sets under .Safe to bump. above to 0.18.0"; refute "safe to bump all"; expect "RC=0"
 run "F2 one set" dev "v0.18.0" prod-application-set
-expect "PREFLIGHT --target v0.18.0 --appset prod-application-set"; expect "RC=0"
+expect "PREFLIGHT --target v0.18.0 --appset prod-application-set"; expect "safe to bump prod-application-set to v0.18.0"; expect "RC=0"
 PF_RC=1 run "F3 diff or error: do not bump, rc 0" production "0.18.0" all
 expect "do NOT bump"; refute "safe to bump"; expect "RC=0"
 PF_RC=2 run "F4 no verdict: rc 0" production "0.18.0" all

@@ -127,7 +127,12 @@ handle_app_chart_preflight() {
     if [ "$choice" != "all" ]; then args+=(--appset "$choice"); fi
     "$bin" "${args[@]}" || rc=$?
     case "$rc" in
-        0) gum style --foreground 46 "Preflight ok: safe to bump $choice to $target." ;;
+        0)
+            if [ "$choice" = "all" ]; then
+                gum style --foreground 46 "Preflight ok: bump only the sets under \"Safe to bump\" above to $target; sets under \"Not checked\" were not checked."
+            else
+                gum style --foreground 46 "Preflight ok: safe to bump $choice to $target."
+            fi ;;
         1) gum style --foreground 196 --bold "Preflight found changes or render errors: do NOT bump the sets it names until the values are fixed." ;;
         *) gum style --foreground 214 "Preflight gave no verdict (exit $rc): check the output above and run it again." ;;
     esac
