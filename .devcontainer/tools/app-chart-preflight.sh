@@ -8,14 +8,15 @@
 # to the cluster and sends nothing anywhere. Also reachable from captain_utils → app_chart_preflight.
 #
 # How: one `argocd admin dashboard` on 127.0.0.1 for the run (Argo CD's API with auth off, loopback only, using your
-# kube credentials), then `argocd app manifests` per app against it, a few apps at a time. Applications and
+# kube credentials), then `argocd app manifests` per app against it, a few apps at a time. Both sides are rendered
+# with an explicit revision (the app's own chart targetRevision, then the target): without one, `app manifests`
+# returns the controller's cached state, which leaves out hook resources (PreSync Jobs and the like). Applications and
 # ApplicationSets are read with kubectl. Needs: kubectl, argocd, jq, yq (mikefarah v4), curl, diff.
 #
 # Exit: 0 every checked ApplicationSet is ok (safe to bump); 1 a set has a diff or an error; 2 a set has no verdict,
 # nothing was checked, a named set does not exist, or the run could not start.
 set -euo pipefail
 
-VERSION="1"
 usage() {
     cat <<'EOF'
 Usage: app-chart-preflight --target REVISION [flags]
@@ -75,7 +76,6 @@ while [ $# -gt 0 ]; do
         --no-color) COLOR=0; shift ;;
         --save) need_arg "$@"; SAVE=$2; shift 2 ;;
         -h|--help) usage; exit 0 ;;
-        --version) echo "app-chart-preflight $VERSION"; exit 0 ;;
         *) die "unknown argument '$1' (see --help)" ;;
     esac
 done
@@ -91,9 +91,7 @@ for c in kubectl argocd jq yq curl diff timeout; do command -v "$c" >/dev/null |
 
 # ---- work dir, kubeconfig, local Argo CD server -------------------------------------------------------------------
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/app-chart-preflight.XXXXXX")
-SERVER_PID=""
 cleanup() {
-    [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null || true
     [ -f "$WORK/server.pid" ] && kill "$(cat "$WORK/server.pid")" 2>/dev/null || true
     rm -rf "$WORK"   # holds a copy of the kubeconfig
 }
@@ -121,9 +119,11 @@ free_port() {
 }
 PORT=$(free_port) || die "no free local port for the Argo CD server"
 
+# The server runs from a subshell, so it is never a job of the main shell (whose `wait -n` counts only workers), and
+# with fd 9 closed, so a server started under ensure_server's lock does not keep holding that lock.
 start_server() {
-    argocd admin dashboard --port "$PORT" --address 127.0.0.1 >"$WORK/server.log" 2>&1 &
-    echo $! > "$WORK/server.pid"
+    ( argocd admin dashboard --port "$PORT" --address 127.0.0.1 </dev/null >"$WORK/server.log" 2>&1 9>&- &
+      echo $! > "$WORK/server.pid" )
     for _ in $(seq 1 180); do
         curl -sf -m 2 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && return 0
         kill -0 "$(cat "$WORK/server.pid")" 2>/dev/null || break
@@ -252,12 +252,21 @@ check_app() {
     app=$(jq -r .app <<<"$item"); set=$(jq -r .set <<<"$item"); id=$(jq -r .id <<<"$item")
     target=$(jq -r .target <<<"$item"); cur=$(jq -r .rev <<<"$item")
     dir="$WORK/apps/$id"; mkdir -p "$dir"
-    local -a revargs
-    if [ "$(jq -r .single <<<"$item")" = true ]; then revargs=(--revision "$target")
-    else revargs=(--revisions "$target" --source-positions "$(jq -r .pos <<<"$item")"); fi
-    rc_cur=0; render "$app" "$dir/cur.yaml" "$dir/cur.err" || rc_cur=$?
-    rc_new=0; render "$app" "$dir/new.yaml" "$dir/new.err" "${revargs[@]}" || rc_new=$?
     result() { jq -c --arg s "$1" --arg r "$2" '. + {status: $s, reason: (if $r == "" then null else $r end), findings: [], other: []}' <<<"$item"; }
+    # Both sides get an explicit revision: with none (or an empty one) argocd returns the controller's cached state,
+    # which has no hooks, so a PreSync Job would look added by the target. An empty git targetRevision means HEAD.
+    if [ -z "$cur" ]; then
+        if [ "$(jq -r .type <<<"$item")" = git ]; then cur=HEAD
+        else result unknown "the app sets no chart targetRevision, so its current chart cannot be rendered"; return; fi
+    fi
+    local -a curargs newargs
+    if [ "$(jq -r .single <<<"$item")" = true ]; then curargs=(--revision "$cur"); newargs=(--revision "$target")
+    else
+        local pos; pos=$(jq -r .pos <<<"$item")
+        curargs=(--revisions "$cur" --source-positions "$pos"); newargs=(--revisions "$target" --source-positions "$pos")
+    fi
+    rc_cur=0; render "$app" "$dir/cur.yaml" "$dir/cur.err" "${curargs[@]}" || rc_cur=$?
+    rc_new=0; render "$app" "$dir/new.yaml" "$dir/new.err" "${newargs[@]}" || rc_new=$?
     if [ "$rc_new" != 0 ] && [ "$rc_new" != 124 ] && grep -qE "$CHART_ERROR" "$dir/new.err"; then result error "$(chart_reason "$dir/new.err")"; return; fi
     if [ "$rc_cur" = 124 ]; then result unknown "argocd app manifests (current) timed out"; return; fi
     if [ "$rc_cur" != 0 ]; then result unknown "argocd app manifests (current) failed: $(stderr_reason "$dir/cur.err")"; return; fi
@@ -270,14 +279,12 @@ check_app() {
     status=$(jq -r 'if any(.findings[]; .impact == "break" or .impact == "roll") then "diff"
                     elif (.findings | length) > 0 then "ok-noop-diff" else "ok" end' "$dir/cmp.json")
     if [ "$status" = diff ] && [ "$SHOW_DIFF" = 1 ]; then
-        local k f=0
+        local k
         while IFS= read -r k; do
             jq --arg k "$k" '.clean.cur[$k] // {}' "$dir/cmp.json" | yq -P 'sort_keys(..)' > "$dir/a.yaml"
             jq --arg k "$k" '.clean.new[$k] // {}' "$dir/cmp.json" | yq -P 'sort_keys(..)' > "$dir/b.yaml"
             diff -u --label "$k @ $cur" --label "$k @ $target" "$dir/a.yaml" "$dir/b.yaml" >> "$dir/diff.txt" || true
-            f=1
         done < <(jq -r '.diffkeys[]' "$dir/cmp.json")
-        [ "$f" = 1 ] || true
     fi
     jq -c --arg s "$status" --slurpfile c "$dir/cmp.json" '. + {status: $s, reason: null, findings: $c[0].findings, other: $c[0].other}' <<<"$item"
 }
@@ -325,8 +332,7 @@ def validate($type; $t):
         | del(.t, .has)) as $groups
 | ($groups | map({(.name): .}) | add // {}) as $G
 | [ $apps[0].items[]
-    | (.metadata.labels["argocd.argoproj.io/application-set-name"]
-       // ([.metadata.ownerReferences[]? | select(.kind == "ApplicationSet") | .name] | .[0]) // "") as $owner
+    | ([.metadata.ownerReferences[]? | select(.kind == "ApplicationSet") | .name] | .[0] // "") as $owner
     | (.spec | chartsrc) as $chart
     | (if $G[$owner] then $owner elif $owner != "" and any($excluded[]; . == $owner) then "#excluded"
        elif $chart != null then (if $G["standalone"] then "standalone" else "#excluded" end) else "#ignored" end) as $set
@@ -364,7 +370,6 @@ progress() { if [ -t 2 ]; then printf '\rchecked %d/%d apps' "$1" "$TOTAL" >&2; 
                  echo "checked $1/$TOTAL apps" >&2; fi; }
 if [ "$TOTAL" -gt 0 ]; then
     start_server || exit 2
-    SERVER_PID=$(cat "$WORK/server.pid")
     running=0 done_n=0
     while IFS= read -r item; do
         id=$(jq -r .id <<<"$item")

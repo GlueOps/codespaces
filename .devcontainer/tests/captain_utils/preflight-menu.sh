@@ -34,7 +34,7 @@ expect "PREFLIGHT --target v0.18.0 --appset prod-application-set"; expect "safe 
 PF_RC=1 run "F3 diff or error: do not bump, rc 0" production "0.18.0" all
 expect "do NOT bump"; refute "safe to bump"; expect "RC=0"
 PF_RC=2 run "F4 no verdict: rc 0" production "0.18.0" all
-expect "no verdict (exit 2)"; expect "RC=0"
+expect "no verdict for some sets (exit 2)"; expect "pick that set on its own"; refute "run it again"; expect "RC=0"
 run "F5 empty target = back" production ""
 refute "GUM CHOOSE"; refute "PREFLIGHT"; expect "RC=0"
 run "F6 Back" production "0.18.0" Back

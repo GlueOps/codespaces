@@ -104,9 +104,9 @@ handle_crds() {
 }
 
 # menu item "app_chart_preflight" — read-only, run BEFORE bumping an ApplicationSet's app-chart targetRevision in
-# manifests/manifest.yaml: renders every tenant Application at the target through this cluster's Argo CD and shows
-# which apps would change or break (GlueOps/argocd-app-chart-preflight, operator mode). Writes nothing to the cluster.
-# Never propagates a non-zero status into the `set -e` menu loop.
+# manifests/manifest.yaml: renders every tenant Application at its current chart and at the target through this
+# cluster's Argo CD and shows which apps would change or break (the app-chart-preflight script installed from
+# .devcontainer/tools). Writes nothing to the cluster. Never propagates a non-zero status into the `set -e` menu loop.
 handle_app_chart_preflight() {
     local bin="${CAPTAIN_UTILS_PREFLIGHT:-app-chart-preflight}" target choice rc=0
     local -a sets=() args=()
@@ -134,7 +134,7 @@ handle_app_chart_preflight() {
                 gum style --foreground 46 "Preflight ok: safe to bump $choice to $target."
             fi ;;
         1) gum style --foreground 196 --bold "Preflight found changes or render errors: do NOT bump the sets it names until the values are fixed." ;;
-        *) gum style --foreground 214 "Preflight gave no verdict (exit $rc): check the output above and run it again." ;;
+        *) gum style --foreground 214 "Preflight gave no verdict for some sets (exit $rc): see \"No verdict\" above. A set that needs another target form (X.Y.Z for helm.gpkg.io or OCI, a tag or branch for git) gets none from a shared target, so pick that set on its own with its own target. A lost connection or timeout can be run again." ;;
     esac
     return 0
 }
