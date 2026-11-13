@@ -103,6 +103,42 @@ handle_crds() {
     return 0
 }
 
+# menu item "app_chart_preflight" — read-only, run BEFORE bumping an ApplicationSet's app-chart targetRevision in
+# manifests/manifest.yaml: renders every tenant Application at its current chart and at the target through this
+# cluster's Argo CD and shows which apps would change or break (the app-chart-preflight script installed from
+# .devcontainer/tools). Writes nothing to the cluster. Never propagates a non-zero status into the `set -e` menu loop.
+handle_app_chart_preflight() {
+    local bin="${CAPTAIN_UTILS_PREFLIGHT:-app-chart-preflight}" target choice rc=0
+    local -a sets=() args=()
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        gum style --foreground 196 "app-chart-preflight is not installed in this codespace image"
+        return 0
+    fi
+    gum style "Target app chart revision: 0.18.0 for sets that source the chart from helm.gpkg.io or OCI, v0.18.0 or a branch for the chart's git repo (empty = back):"
+    if ! read -r -e -p "target> " target; then return 0; fi
+    target="${target//[[:space:]]/}"
+    if [ -z "$target" ]; then return 0; fi
+    if [ -f manifests/manifest.yaml ]; then
+        mapfile -t sets < <(yq -N 'select(.kind == "ApplicationSet") | .metadata.name' manifests/manifest.yaml 2>/dev/null | grep -v '^null$' || true)
+    fi
+    choice=$(gum choose "all" "${sets[@]}" "Back") || return 0
+    if [ "$choice" = "Back" ]; then return 0; fi
+    args=(--target "$target")
+    if [ "$choice" != "all" ]; then args+=(--appset "$choice"); fi
+    "$bin" "${args[@]}" || rc=$?
+    case "$rc" in
+        0)
+            if [ "$choice" = "all" ]; then
+                gum style --foreground 46 "Preflight ok: bump only the sets under \"Safe to bump\" above to $target; sets under \"Not checked\" were not checked."
+            else
+                gum style --foreground 46 "Preflight ok: safe to bump $choice to $target."
+            fi ;;
+        1) gum style --foreground 196 --bold "Preflight found changes or render errors: do NOT bump the sets it names until the values are fixed." ;;
+        *) gum style --foreground 214 "Preflight gave no verdict for some sets (exit $rc): see \"No verdict\" above. A set that needs another target form (X.Y.Z for helm.gpkg.io or OCI, a tag or branch for git) gets none from a shared target, so pick that set on its own with its own target. A lost connection or timeout can be run again." ;;
+    esac
+    return 0
+}
+
 handle_platform_upgrades() {
     # Handle exit option
     if [ "$environment" = "production" ]; then
@@ -328,7 +364,7 @@ handle_inspect_pods() {
 
 show_production(){
     while true; do
-        component=$(gum choose "show_diff_table" "crds" "argocd" "glueops-platform" "aws" "inspect_pods" "Exit")
+        component=$(gum choose "show_diff_table" "crds" "argocd" "glueops-platform" "app_chart_preflight" "aws" "inspect_pods" "Exit")
 
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -359,6 +395,10 @@ show_production(){
             handle_argocd
         fi
         
+        if [ "$component" = "app_chart_preflight" ]; then
+            handle_app_chart_preflight
+        fi
+
         if [ "$component" = "inspect_pods" ]; then
             handle_inspect_pods
         fi
@@ -368,7 +408,7 @@ show_production(){
 
 show_dev(){
     while true; do
-        component=$(gum choose "crds" "argocd" "glueops-platform" "aws" "Exit")
+        component=$(gum choose "crds" "argocd" "glueops-platform" "app_chart_preflight" "aws" "Exit")
         
         # Handle exit option
         if [ "$component" = "Exit" ]; then
@@ -394,7 +434,9 @@ show_dev(){
             handle_argocd
         fi
 
-        
+        if [ "$component" = "app_chart_preflight" ]; then
+            handle_app_chart_preflight
+        fi
     done
 }
 

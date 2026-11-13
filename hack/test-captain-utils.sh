@@ -12,7 +12,7 @@ if command -v shellcheck >/dev/null; then
 else
     echo "== shellcheck: not installed, skipped"
 fi
-for t in contract platform-custom crds-menu legacy-gate crds-cli crds-terminating; do
+for t in contract platform-custom crds-menu preflight-menu legacy-gate crds-cli crds-terminating; do
     echo "== $t"; bash "$TESTS/$t.sh" | grep -E '^#####|FAIL|assertions|command not found' | awk '{print} /^  FAIL|command not found/{bad=1} END{exit bad}'
 done
 # The cluster test is opt-in: it creates a kind cluster and takes minutes, while everything above is offline and
