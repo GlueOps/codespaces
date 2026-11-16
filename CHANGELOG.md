@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.166.0](https://github.com/GlueOps/codespaces/compare/v0.165.0...v0.166.0) (2026-11-16)
+
+
+### Features
+
+* app-chart-preflight, a check to run before an app chart bump (captain_utils menu item) ([#630](https://github.com/GlueOps/codespaces/issues/630)) ([5b1cd35](https://github.com/GlueOps/codespaces/commit/5b1cd35aa724671227dad882c1bae4042466b246))
+* **deps:** update actions/create-github-app-token action to v3.3.0 ([#635](https://github.com/GlueOps/codespaces/issues/635)) ([117dd6d](https://github.com/GlueOps/codespaces/commit/117dd6d40a40b2843213b522e52ac0effdad07d4))
+* **deps:** update dependency cloudflare/cloudflared to v2026.10.0 ([#625](https://github.com/GlueOps/codespaces/issues/625)) ([652b776](https://github.com/GlueOps/codespaces/commit/652b776cd840a54b0f61130f575e1b0ba42c4a0e))
+
 ## [0.165.0](https://github.com/GlueOps/codespaces/compare/v0.164.0...v0.165.0) (2026-11-10)
 
 
