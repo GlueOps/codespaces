@@ -21,6 +21,8 @@ platform, and the VM setup that runs it as a cloud development environment (CDE)
 
 - `hack/test-codespace-vm.sh`: the VM scripts and units, inside a pinned debian:13 container (needs docker).
 - `hack/test-captain-utils.sh`, `hack/test-gluekube-ssh.sh`: the image's tools.
+- `hack/test-app-chart-preflight.sh`: `app-chart-preflight` against stubbed `kubectl` and `argocd`, no cluster. Runs
+  on the host and needs bash, jq, yq (mikefarah v4), python3 (the stub Argo CD server), curl, diff and timeout.
 - `hack/test.sh`: all of the above (`CODESPACE_VM_TEST_DOCKER=1` to include the VM suite).
 - Each suite has its own workflow under `.github/workflows/` with path triggers.
 
