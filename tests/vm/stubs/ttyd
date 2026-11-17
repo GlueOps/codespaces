@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Logs its arguments with the -c value replaced, and whether that value was vscode:<shell_token>,
+# so no test log ever holds the token.
+S=${STATE:-/tmp/vmstate}
+args=() cred=none
+while [ $# -gt 0 ]; do
+    if [ "$1" = -c ]; then
+        [ "$2" = "vscode:$(cat /etc/glueops/shell_token)" ] && cred=ok || cred=wrong
+        args+=(-c REDACTED); shift 2; continue
+    fi
+    args+=("$1"); shift
+done
+echo "ttyd ${args[*]} cred=$cred [as $(id -un)]" >> "$S/calls"
