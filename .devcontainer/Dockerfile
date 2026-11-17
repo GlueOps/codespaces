@@ -73,9 +73,10 @@ RUN curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v${VERSION_KUBECTL
     && chmod +x /usr/local/bin/kubectl \
     && curl -Lo tofu_${VERSION_OPENTOFU}_linux_amd64.zip https://github.com/opentofu/opentofu/releases/download/v${VERSION_OPENTOFU}/tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
     && unzip tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
-    && mv tofu /usr/local/bin \
+    && mv tofu /usr/local/libexec/tofu \
     && rm tofu_${VERSION_OPENTOFU}_linux_amd64.zip \
     && ln -s /usr/local/bin/tofu /usr/local/bin/terraform \
+    && tofu version && terraform version \
     && curl -Lo helm.tar.gz https://get.helm.sh/helm-v${VERSION_HELM}-linux-amd64.tar.gz \
     && tar -xvf helm.tar.gz \
     && mv linux-amd64/helm /usr/local/bin \
@@ -188,6 +189,8 @@ RUN mkdir -p /home/vscode/.vscode-server
 RUN ln -s /home/vscode/.vscode-remote/extensions /home/vscode/.vscode-server/extensions
 
 ADD ../misc-configs/helm-repositories.yaml /home/vscode/.config/helm/repositories.yaml
+# The tofu mirror (README "OpenTofu mirror").
+COPY misc-configs/tofurc /home/vscode/.tofurc
 RUN mkdir -p /home/vscode/.local/share/helm/plugins \
     && curl -L https://github.com/databus23/helm-diff/releases/download/v${VERSION_HELM_DIFF}/helm-diff-linux-amd64.tgz | tar -C /home/vscode/.local/share/helm/plugins -xzv
 RUN git config --global --add --bool push.autoSetupRemote true
