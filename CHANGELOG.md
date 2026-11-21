@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.167.0](https://github.com/GlueOps/codespaces/compare/v0.166.0...v0.167.0) (2026-11-21)
+
+
+### Features
+
+* **deps:** update dependency microsoft/vscode to v1.145.3 ([#636](https://github.com/GlueOps/codespaces/issues/636)) ([dacf75d](https://github.com/GlueOps/codespaces/commit/dacf75d5ff723a1c194be4ba3b2b4a823a9b20b0))
+* fetch opentofu providers and modules through the tofu mirror ([#629](https://github.com/GlueOps/codespaces/issues/629)) ([29eb439](https://github.com/GlueOps/codespaces/commit/29eb4390c78d25aebf0f72a76c85341b0a8887c9))
+
+
+### Dependencies
+
+* update dependency cloudflare/cloudflared to v2026.10.1 ([#637](https://github.com/GlueOps/codespaces/issues/637)) ([78100b6](https://github.com/GlueOps/codespaces/commit/78100b60d2bc2640fe7bf941db9689838168df1c))
+* update dependency packer to v1.16.2 ([#643](https://github.com/GlueOps/codespaces/issues/643)) ([914070c](https://github.com/GlueOps/codespaces/commit/914070c259cade3ec3467f8e916be203a75bbc13))
+
 ## [0.166.0](https://github.com/GlueOps/codespaces/compare/v0.165.0...v0.166.0) (2026-11-16)
 
 
